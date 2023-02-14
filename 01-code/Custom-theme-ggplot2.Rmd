@@ -1,0 +1,115 @@
+---
+title: "Custom theme for a `ggplot2` graph"
+author: "Constantin Manuel Bosancianu"
+date: "May 7, 2021"
+output:
+  rmdformats::downcute:
+    self_contained: true
+    thumbnails: true
+    lightbox: true
+    gallery: false
+    code_folding: hide
+    highlight: pygments
+---
+
+The following lines of code prepare a custom theme for the graphs that will be  produced. If you just add this theme at the end of every plot with `+ theme()` you will get the same design. Feel free to customize this theme as much as you like.
+
+```{r setup-packages, warning=FALSE, message=FALSE, comment=NA, results='hide'}
+knitr::opts_chunk$set(echo = TRUE,
+                      warning = FALSE,
+                      error = FALSE,
+                      comment = NA,
+                      message = FALSE)
+
+library(pacman)
+p_load(ggplot2)
+
+set.seed(475934)
+```
+
+Create 2 correlated variables for a scaterplot.
+
+```{r create-data}
+a <- rnorm(100, 0, 1)
+b <- 0.2 + 0.45 * a + rnorm(100, 0, 0.5)
+
+df_plot <- data.frame(A = a,
+                      B = b)
+```
+
+# Initial version
+
+First version of the plot.
+
+```{r first-version, fig.height=4, fig.width=6, fig.align='center'}
+ggplot(df_plot,
+       aes(x = A,
+           y = B)) +
+    geom_point(size = 2) +
+    labs(x = "A (independent)",
+         y = "B (dependent)",
+         title = "Example of scatterplot",
+         caption = "Note: Simulated data")
+```
+
+# Customized version
+
+Customize theme.
+
+```{r customized-version, fig.height=4, fig.width=6, fig.align='center'}
+ggplot(df_plot,
+       aes(x = A,
+           y = B)) +
+    geom_point(size = 2) +
+    labs(x = "A (independent)",
+         y = "B (dependent)",
+         title = "Example of scatterplot",
+         caption = "Note: Simulated data") +
+    theme(plot.title = element_text(size = 18, face = "bold", color = "black"),
+          # Controls the main title of the graph: 18 points, bold point, black color.
+          axis.title.x = element_text(size = 16, face = "bold", color = "black", angle = 0),
+          # Controls the label of the X axis.
+          axis.title.y = element_text(size = 16, face = "bold", color = "black", angle = 90),
+          # Controls the label of the Y axis.
+          axis.text.x = element_text(size = 12, color = "black", angle = 45),
+          # Controls the X-axis text (usually, numbers which are plotted on the axis).
+          axis.text.y = element_text(size = 12, color = "black", angle = 45, vjust = 0),
+          # Controls the Y-axis text.
+          panel.grid.major.x = element_blank(),
+          # Controls whether the X axis should have thick grid lines.
+          # Sometimes, e.g. if you're plotting longitudinal trends,
+          # you may not want vertical grid lines.
+          # If you nevertheless want vertical grid lines, use
+          # "element_line()" instead of "element_blank()", and specify
+          # the characteristics of the line (color, size, line type).
+          panel.grid.minor.x = element_blank(),
+          # Controls whether the X axis should have thin grid lines.
+          panel.grid.major.y = element_line(color = "grey80"),
+          # Controls whether the Y axis should have thick horizontal lines.
+          panel.grid.minor.y = element_line(color = "grey40"),
+          # Controls whether the Y axis should have thin horizontal lines.
+          panel.background = element_rect(fill = "white", color = NA),
+          # Controls the panel background (whether it's grey (the
+          # default), or white, or whatever color you need).
+          plot.background = element_rect(fill = "white", color = NA),
+          # Controls the entire plot background (whether it's white,
+          # or light blue (as in Stata)).
+          legend.title = element_text(color = "black", face = "bold", size = 12),
+          # Controls the title of the legend (not a feature in this
+          # specific plot). 
+          legend.key = element_rect(color = "white"),
+          # Controls the background color of the legend text (not a
+          # feature in this specific plot).
+          legend.text = element_text(color = "black", size = 10),
+          # Controls the text of the legend elements (not a feature in
+          # this specific plot).
+          legend.position = "right",
+          # Controls the position of the legend (not a feature in this
+          # specific plot).
+          axis.ticks = element_blank())
+          # Controls whether there should be small notches on the
+          # axes, where the numbers are, or not. I prefer not to have
+          # them there.
+```
+
+If you want to, you can save this entire theme specification in a new object called `personal_theme`. If you want to apply it to every plot, you would just add `+ personal_theme()` at the end of each plot, and it would be formatted in the same way.

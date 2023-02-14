@@ -1,0 +1,583 @@
+---
+title: "Session 3 Code (day 2)"
+author: "Constantin Manuel Bosancianu"
+date: "May 6, 2021"
+output:
+  rmdformats::downcute:
+    self_contained: true
+    thumbnails: true
+    lightbox: true
+    gallery: false
+    code_folding: hide
+    highlight: pygments
+---
+
+# Introduction
+Given how short our time together is, we don't have time to go into more examples of how to use `R` and `dplyr` for data cleaning and transformation tasks. There are definitely more topics to cover, such as the use of the `pivot_longer()` and `pivot_wider()` functions from the `tidyr` package for data reshaping, but these will have to be postponed for now. We devote all of our remaining time here to using one package in R: `ggplot2`.
+
+To make things easier, we continue to use the QoG data that we introduced yesterday, since we already have some experience with the format of the data, and with how the variables are named. Today, though, we'll be focusing on a different set of variables.
+
+
+# Preparations for plotting
+Run the `p_load()` function to load a set of packages that we will need. You already encountered this function, so please check back the notes from yesterday to see how it works.
+
+```{r setup-packages, warning=FALSE, message=FALSE, comment=NA, results='hide'}
+knitr::opts_chunk$set(echo = TRUE,
+                      warning = FALSE,
+                      error = FALSE,
+                      comment = NA,
+                      message = FALSE)
+
+library(pacman)
+p_load(tidyverse, ggthemes)
+```
+
+We also no longer need to set the working directory, since `.Rmd` files use as working directory the folder in which they are placed.
+
+```{r load-data}
+df_qog_21 <- readRDS(file = "../02-data/01-QoG-2021.rds")
+```
+
+
+
+# `ggplot2` interlude
+The main command in the package is `ggplot()`. Within `ggplot()`, we specify the data that we have to work with. More important, though, we specify how variables in our data map onto plot features like the X axis, or color, or size of points - we do this inside the `aes()` function (the name stands for *aesthetics*). Let's start with looking at income inequality (this is not found in this format in the **QoG**, but was rather added by me from the **Standardized World Income Inequality Database**). Higher values on the `gini` variable denote a higher level of income inequality, as we mentioned yesterday.
+
+```{r plot-01, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = df_qog_21,
+       mapping = aes(x = gini))
+```
+
+So far, though, we have not told `R` what kind of plot we want. We have only mentioned that we want one variable plotted on the X-axis (in the coming sections you will see that we can specify more complex aesthetics inside the `aes()` function). Without more information about precisely what kind of plot we want, `R` can't yet know whether we're aiming for a histogram, a bar plot, a density plot, or some other kind of design.
+
+We ask for a specify type of plot with one of the functions from the `geom_` family. A few examples:
+
+1. Bar plot: `geom_bar()`
+2. Histogram: `geom_histogram()`
+3. Scatterplot: `geom_point()`
+4. Line plots: `geom_line()`
+5. ... and so on ...
+
+```{r plot-02, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = df_qog_21,
+       mapping = aes(x = gini)) +
+    geom_histogram()
+```
+
+The plot is still very rudimentary, and we are far away from a figure that is effective, parsimonious, and intelligible. However, the example above is sufficient to see that `ggplot2` plots are built gradually, much like you would build a complex sentence. Layers (such as titles for the X and Y axes, or maybe labels for the ticks on the X and Y axes) are stacked on top of other layers to produce a final plot. The layers are combined using the "+" symbol. In this way, the "+" functions a bit like the pipe operator, in the sense that it links together additional elements of the plot.
+
+Here is an additional layer here, for example, dealing with the X-axis label. By default, this label is set to the name of the variable we're plotting, but we want to customize it with a more intelligible name.
+
+```{r plot-03, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = df_qog_21,
+       mapping = aes(x = gini)) +
+    geom_histogram() +
+    labs(x = "Gini index of net income inequality")
+```
+
+Once you learned how to use a layer, you can apply it again and again to any type of plot you want. For example, if you wanted to label a scatterplot, you would use the same `labs()` function.
+
+Before continuing with the plotting, though, I would like to select a smaller data set. Let's focus only on one specific year in the **QoG** data. We can easily do this with the help of the tools in the `dplyr` package: particularly `filter()`, if you remember our list of important functions from yesterday.
+
+```{r filter-data}
+df_qog_small <- df_qog_21 %>%
+  filter(year == 2014) # Select all obs. in 2014
+```
+
+The code above just takes `df_qog_21` as an input, and then subsets the observations for the year 2014. These observations (and only these) are then stored in the `df_qog_small` object.^[Yesterday we were just displaying the resulting data, but now we want to store it in a separate object, so as to use it further in plotting.]
+
+Let's properly start now by looking closer at histograms and bar plots, using this `df_qog_small` data.
+
+
+# Histograms and Bar Plots
+Histograms and bar plots look very similar to each other, though the former are used for continuous data, whereas the latter are used for categorical data.
+
+## Histograms
+Let's start with a histogram. I'm particularly interested in income inequality at a global level. In this data set, income inequality is measured on a theoretical scale from 0 to 100, where 0 denotes perfect equality (each person earns an identical income) and 100 denotes perfect inequality (one person earns all the income in the country).
+
+```{r plot-04, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = df_qog_small,
+       mapping = aes(x = gini)) +
+    geom_histogram()
+```
+
+Histograms are good for showing the distribution of a variable, as well as offering clues about its spread. To simplify things, I will store the basic plot design in an object called `p1`, and then start to customize it by adding layers to it. `ggplot2` allows you to create these objects, as a way to minimize the amount of code you have to write, if you're presenting multiple versions of the same plot.
+
+In the next step, I try to present the data in slightly fewer categories, for the sake of simplicity. `geom_histogram()` contains arguments to help you customize the look of the histogram display: color, fill, number of bins, transparency.
+
+```{r plot-05, fig.height=6, fig.width=9, fig.align='center'}
+p1 <- ggplot(data = df_qog_small,
+             mapping = aes(x = gini))
+
+p1 + geom_histogram(bins = 15) # Set number of bins
+```
+
+The `geom_histogram()` function also has a number of options that allow you to alter the color, fill, and even the transparency of the bins that make up the histogram. In the code below, the `alpha` parameter controls transparency, and it varies between 0 and 1. The higher the value, the more opaque the bar. As you will see in more of today's plots, the same parameter `alpha` controls transparency for points, lines, or bars.
+
+```{r plot-06, fig.height=6, fig.width=9, fig.align='center'}
+p1 + geom_histogram(bins = 15,
+                    color = "orange", # only the color of the edges
+                    fill = "orange", # the full bin color
+                    alpha = 0.5)
+```
+
+At the end of the class, I will show you how to define your own custom plot theme, which you can use to generate all the plots in a paper or a report. The custom plot theme could include everything, from the colors used in plots, to font size for axis labels, to background colors etc. However, for convenience, `ggplot2` already has a couple of pre-defined themes that you can easily use.
+
+```{r plot-07, fig.height=6, fig.width=9, fig.align='center'}
+p1 + geom_histogram(bins = 15,
+                    color = "orange",
+                    fill = "orange",
+                    alpha = 0.5) +
+    theme_bw() # theme "black & white"
+```
+
+Before we move on to a slightly more complex histogram, we should first try to put a set of labels on the axes, as well as a title on the plot. We can do this with the `labs()` function.
+
+```{r plot-08, fig.height=6, fig.width=9, fig.align='center'}
+p1 + geom_histogram(bins = 15,
+                    color = "orange",
+                    fill = "orange",
+                    alpha = 0.5) +
+    theme_bw() +
+    labs(x = "Income inequality",
+         y = "Number of countries",
+         title = "Global income inequality in 2014",
+         subtitle = "N = 139 countries and territories",
+         caption = "Data from the SWIID, version 9.0 (October 2020)")
+```
+
+So far we have only tweaked the color of the plot as a whole, but we haven't yet mapped colors to specific variables. What if we wanted to see how democracies compare to non-democracies in terms of income inequality? For this, we have to map a variable to a feature of the histogram, such as color.
+
+Although this is a bit unsystematic, a quick way of getting to an indicator of democracy is to turn a country's score on the V-DEM *liberal democracy* dimension into a dichotomous variable. We can do this with the `mutate()` function from yesterday, combined with either `if_else()` or `case_when()`.
+
+```{r create-dichotomous-democracy}
+df_qog_small <- df_qog_small %>%
+    mutate(demo = if_else(vdem_libdem < 0.4, "Non-democracy", "Democracy"))
+```
+
+Because we have to alter the mapping of the aesthetics, we can't use the `p1` object we've used so far anymore. We have to create a new plot, with a different mapping.
+
+```{r plot-09, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = na.omit(df_qog_small[ ,c("gini", "demo")]),
+       mapping = aes(x = gini,
+                     fill = demo)) + # This is where things change
+    geom_histogram(bins = 15,
+                   alpha = 0.5) +
+    theme_bw()
+```
+
+## Density plots
+An alternative to using a histogram is the density plot, which does away with the bins.
+
+```{r plot-10, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = na.omit(df_qog_small[ ,c("gini", "demo")]),
+       mapping = aes(x = gini,
+                     fill = demo)) + # This is where things change
+    geom_density(alpha = 0.5) +
+    theme_bw()
+```
+
+Keep in mind what the density plot is showing you, and why it looks slightly different from the histogram. The density plot depicts the share of cases (a probability) at each location on the X-axis, but it does so for each of the two groups of countries separately.
+
+You can easily get rid of the black border on the densities if you want to.
+
+```{r plot-11, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = na.omit(df_qog_small[ ,c("gini", "demo")]),
+       mapping = aes(x = gini,
+                     fill = demo,
+                     color = demo)) + # Here we changed line colors
+    geom_density(alpha = 0.5) +
+    theme_bw()
+```
+
+It looks like a slightly higher share of non-democracies than democracies have larger values of income inequality, yet the relationship is not really as clear-cut as I would have expected it to be. It might be an issue of data availability in this particular year, though.
+
+## Bar plots
+We will come back to the question above, but for now let's see how we might go about making a bar plot. For this, I will recode the continuous income inequality measure into a categorical one, using a 6-point interval (roughly). We can use the `mutate()` function again for this, but instead of `if_else()` (like above), we can try the `case_when()` function.
+ 
+```{r split-inequality-categories}
+df_qog_small <- df_qog_small %>%
+    mutate(gini7cat = case_when(gini <= 29 ~ "Very low",
+                                gini > 29 & gini <= 34 ~ "Low",
+                                gini > 34 & gini <= 39 ~ "Below average",
+                                gini > 39 & gini <= 44 ~ "Average",
+                                gini > 44 & gini <= 49 ~ "Above average",
+                                gini > 49 & gini <= 54 ~ "High",
+                                gini > 54 ~ "Very high"))
+```
+
+We have all we need to be able to create the bar plot now.
+
+```{r plot-12, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = na.omit(df_qog_small[ ,c("gini7cat","cname")]),
+       mapping = aes(x = gini7cat)) +
+    geom_bar() + # Opt for a bar plot, instead of histogram
+    theme_bw() +
+    labs(x = "Income inequality",
+         y = "Number of countries",
+         title = "Income inequality across the globe")
+```
+
+As you can see, all the other functions for setting a custom theme, and labeling the axes and the plot work just the same as before (there are no custom arguments to the `geom_bar()` function that would label axes just for a bar plot, for example). This is one of the strengths of `ggplot2`: once you learn what a function like `labs()` does for a bar plot, you can be sure it does the same thing for a scatterplot, or a density plot.
+
+One frustrating aspect is that the categories are displayed alphabetically by default, which doesn't make sense, in addition to making the plot difficult to interpret. This is why we have to find a way to force a particular order on them. We can again use our old friend `mutate()` for this.
+
+```{r order-factor-levels}
+df_qog_small <- df_qog_small %>%
+    mutate(gini7cat = factor(gini7cat, levels = c("Very low","Low",
+                                                  "Below average",
+                                                  "Average",
+                                                  "Above average",
+                                                  "High","Very high")))
+```
+
+```{r plot-13, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = na.omit(df_qog_small[ ,c("gini7cat","cname")]),
+       mapping = aes(x = gini7cat)) +
+    geom_bar() +
+    theme_bw() +
+    labs(x = "Income inequality",
+         y = "Number of countries",
+         title = "Income inequality across the globe")
+```
+
+`ggplot2` can also compute custom quantities inside the plotting function, though I don't recommend that when you're computing *weighted* quantities. In these specific cases, it's usually much better to just compute things outside of `ggplot2`, and then use these summary quantities in the plotting command.
+
+By default, `geom_bar()` displays raw counts, but what if we wanted to show percentages? In this case, we don't need to compute them by hand; `geom_bar()` will compute them automatically for us. This will also show how each `geom_` type also has a mapping of its own that you can specify.
+
+```{r plot-14, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = na.omit(df_qog_small[ ,c("gini7cat","cname")]),
+       mapping = aes(x = gini7cat)) +
+    geom_bar(mapping = aes(y = ..prop..)) +
+    theme_bw()
+```
+
+So what happened here? The reason for this is that `geom_bar()` is trying to give you the proportions within each category of the X-axis. 100% of *Very low* are in *Very low*, which is why each bar sums up to 100%. What we want is to tell `geom_bar()` that we want the relative frequency of each bar out of the total number of observations.
+
+```{r plot-15, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = na.omit(df_qog_small[ ,c("gini7cat","cname")]),
+       mapping = aes(x = gini7cat)) +
+    geom_bar(mapping = aes(y = ..prop.., group = 1)) +
+    theme_bw()
+```
+
+We leave this plot here, and move on to other types of displays. However, we will see in one of the next sessions how to make the Y-axis a bit nicer considering that we're displaying a percentage.
+
+
+# Line plots
+Let's turn, instead, to presenting some trends over time. For this, I will have to construct a different type of data set. We rely again on the `dplyr` package.
+
+Leaving aside income inequality, I want to focus on a measure of political equality: an index of egalitarian democracy from the **V-DEM** data. However, keep in mind that the index also refers to material equalities, and not only equality in political influence.
+
+```{r preparing-time-trends}
+df_qog_small <- df_qog_21 %>%
+    group_by(year) %>%
+    summarise(equal = mean(vdem_egal, na.rm = TRUE))
+```
+
+One way to display this is, of course, through something that looks very much like a bar plot: `geom_col()`.
+
+```{r plot-16, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = df_qog_small,
+       mapping = aes(x = year,
+                     y = equal))  +
+    geom_col() +
+    theme_bw()
+```
+
+However, doesn't this represent a waste of ink when the underlying information in the data is so simple? It's not really the case that those bars are telling us that much. For these temporal trends, we can make use of `geom_line()`.
+
+```{r plot-17, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = df_qog_small,
+       mapping = aes(x = year,
+                     y = equal))  +
+    geom_line() +
+    theme_bw()
+```
+
+Notice how the Y-axis has been automatically rescaled, making the trend seem more dramatic than it appeared in the previous version of the plot.
+
+You can, of course, make the line a bit prettier, just like we saw we could do with a histogram.
+
+```{r plot-18, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = df_qog_small,
+       mapping = aes(x = year,
+                     y = equal))  +
+    geom_line(linewidth = 3,    # Control line thickness
+              color = "orange",
+              alpha = 0.50) +   # Control line opacity
+    theme_bw()
+```
+
+Without additional mapping of aesthetics, we can't do that much in a line plot. We would need to have a way to distinguish between the lines, and for that we need an additional mapping.
+
+```{r plot-19, fig.height=6, fig.width=9, fig.align='center'}
+df_qog_small <- df_qog_21 %>%
+    group_by(continent, year) %>%
+    summarise(equal = mean(vdem_egal, na.rm = TRUE))
+
+ggplot(data = na.omit(df_qog_small),
+       mapping = aes(x = year,
+                     y = equal,
+                     group = continent))  +
+    geom_line() +
+    theme_bw()
+rm(df_qog_small)
+```
+
+Right now this plot is not telling us that much, but in the next session we will go over how to clearly label these lines. Imagine, though, if we tried to present the entire data like this...
+
+```{r plot-20, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = na.omit(df_qog_21[ ,c("year","vdem_egal","cname")]),
+       mapping = aes(x = year,
+                     y = vdem_egal,
+                     group = cname))  +
+    geom_line() +
+    theme_bw()
+```
+
+
+# Scatterplots
+A foundational type of plot, used to present bivariate relationships. It works best in instances where both variables that will be plotted are truly continuous. If both variables are categorical, even with a lot of categories, all the dots will be superimposed in a grid pattern at specific combinations of the two variables, e.g. $(1,1)$, $(1,2)$, $(2,1)$, $(2,2)$. Without additional techniques, like jittering or setting the transparency of points, not much insight can be obtained from such a plot.
+
+Let's look at the association between political equality and income inequality (though keep in mind that the index of equality from V-DEM does contain a material component as well). Like before, we'll only take one year to look at: 2014. For scatterplots, we rely on the `geom_point()` function.
+
+```{r plot-21, fig.height=6, fig.width=9, fig.align='center'}
+df_qog_small <- df_qog_21 %>%
+  filter(year == 2014)
+
+ggplot(data = df_qog_small,
+       mapping = aes(x = gini,
+                     y = vdem_egal)) + 
+  geom_point() + 
+  theme_bw()
+```
+
+This is a bivariate plot, so the mapping requires at least 2 variables, which are plotted on the X- and Y-axes. You can apply all of the tricks you learned above to this plot as well.
+
+```{r plot-22, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = df_qog_small,
+       mapping = aes(x = gini,
+                     y = vdem_egal)) +
+    geom_point(size = 2, # control size of points
+               color = "blue", # set color of points
+               shape = 3) + # set shape of points
+    theme_bw() +
+    labs(x = "Income inequality",
+         y = "Index of democratic equality",
+         title = "Relationship between political and economic equality")
+```
+
+Like before, I will save a basic version of the plot in an `R` object, called `p1` for easy further customization. As I mentioned already, this is a space-saving device, as we don't have to repeat writing code to design the basics of the plot.
+
+You can easily add a fit line to the points, through the `geom_smooth()` function.
+
+```{r plot-23, fig.height=6, fig.width=9, fig.align='center'}
+p1 <- ggplot(data = df_qog_small,
+             mapping = aes(x = gini,
+                           y = vdem_egal)) +
+    geom_point(size = 2.5,
+               color = "blue") +
+    theme_bw()  +
+    labs(x = "Income inequality",
+         y = "Index of democratic equality",
+         title = "Relationship between political and economic equality")
+
+p1 + geom_smooth(method = "lm", # draw a straight line
+                 se = FALSE) # no standard errors displayed
+```
+
+You can control a lot of things about this fit line, from inside of the `geom_smooth()` function.^[Though it might not look like it from the syntax, this function is running a regression in the background and displaying the line of best fit on the plot.] Below, we're instructing `geom_smooth()` to draw a local line of best fit, rather than one for the entire set of points; this is more sensitive to outliers that the line of global fit.
+
+```{r plot-24, fig.height=6, fig.width=9, fig.align='center'}
+p1 + geom_smooth(method = "loess", # draw a curved line
+                 se = FALSE,
+                 linewidth = 1.5, # thicker line
+                 color = "brown") # set color of line
+```
+
+You can even combine the two lines in the same plot, if you wanted to make a point about the sensitivity of conclusions to the choice of model applied to the data.
+
+```{r plot-25, fig.height=6, fig.width=9, fig.align='center'}
+p1 + geom_smooth(method = "loess",
+                 se = FALSE,
+                 linewidth = 1.5,
+                 color = "brown") +
+    geom_smooth(method = "lm",
+                se = FALSE,
+                linewidth = 1.5,
+                color = "brown",
+                linetype = "dashed") # a dashed straight line
+```
+
+You have complete freedom over what colors to use for the dots, as well as for the lines on the plot. However, my suggestion would be to choose some more muted colors, and not overdo it with the colors on a plot. Here is an example of 3 colors that you can manually specify to the plotting functions.
+
+```{r custom-colors}
+custom.col <- c("#00AFBB", # cyan
+                "#E7B800", # yellow
+                "#D16103") # red
+```
+
+You can supply these colors directly to the plotting functions in `ggplot2` so as to get the desired color. Try to avoid, as much as possible, using more than 2-3 colors on the plot, as they will distract. Maybe use a combination of colors and shapes for points (or lines), as these give you more flexibility while at the same time keeping the color in the plot at manageable levels.
+
+If producing the plot for a journal where there are restrictions on color, then try to do as much as possible with shades of gray, as well as shapes.
+
+Here I also show you a few of the custom themes that you can access in the `ggthemes` package.^[Notice that I no longer specify `theme_bw()` anymore. This means that the plot will be reverted back to the original format - slightly dull, but definitely legible.]
+
+```{r plot-26}
+p1 <- ggplot(data = df_qog_small,
+             mapping = aes(x = gini,
+                           y = vdem_egal)) +
+    geom_point(size = 2.5) +
+    labs(x = "Income inequality",
+         y = "Index of democratic equality",
+         title = "Relationship: political and economic equality")
+```
+
+Theme from *The Economist*:
+
+```{r plot-27, fig.height=6, fig.width=9, fig.align='center'}
+p1 + theme_economist()
+```
+
+*Solarized* theme:
+
+```{r plot-28, fig.height=6, fig.width=9, fig.align='center'}
+p1 + theme_solarized()
+```
+
+*Stata* theme:
+
+```{r plot-29, fig.height=6, fig.width=9, fig.align='center'}
+p1 + theme_stata()
+```
+
+*Tufte* theme:
+
+```{r plot-30, fig.height=6, fig.width=9, fig.align='center'}
+p1 + theme_tufte()
+```
+
+*538* theme:
+
+```{r plot-31, fig.height=6, fig.width=9, fig.align='center'}
+p1 + theme_fivethirtyeight()
+```
+
+My favorite theme for academic papers:
+
+```{r plot-32, fig.height=6, fig.width=9, fig.align='center'}
+p1 + theme_clean()
+```
+
+Check out more themes here: [https://yutannihilation.github.io/allYourFigureAreBelongToUs/ggthemes/](https://yutannihilation.github.io/allYourFigureAreBelongToUs/ggthemes/).
+
+
+# Box-and-whisker plots
+Box-and-whisker plots are great for showing basic statistics related to central tendency and spread for data. We could, naturally, present some of these statistics as a scatterplot.
+
+Start by selecting 6 typical years. **Warning**: the code below overwrites the data set!
+
+```{r prepare-custom-years-1}
+df_qog_21 <- df_qog_21 %>% 
+  filter(year %in% c(1965, 1975, 1985, 1995, 2005, 2015)) %>% 
+  mutate(year = as.factor(year))
+```
+
+```{r prepare-custom-years-2}
+df_qog_summ <- df_qog_21 %>%
+    group_by(year) %>%
+    summarise(gini = mean(gini, na.rm = TRUE))
+```
+
+We start with something we already know: a scatterplot presenting means of Gini in each time period.
+
+```{r plot-33, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = df_qog_summ,
+       mapping = aes(x = year,
+                     y = gini)) + 
+  geom_point(size=3) + 
+  theme_solarized_2()
+```
+
+This strategy can only get you so far, though. It's certainly helpful in conveying that since 1965 income inequality has generally been on an upward trend until about the mid-2000s. However, it doesn't say much about the spread in inequality over the same period, or whether this change in the mean has simply taken place because of a few outliers in the data. A box-and-whisker plot can help depict a wider variety of statistics at the same time.
+
+```{r plot-34, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = df_qog_21,
+       mapping = aes(x = year,
+                     y = gini,
+                     group = year)) + # Asking for separate boxes per year
+  geom_boxplot() +
+  theme_solarized_2()
+```
+
+Elements of the plot:
+
+* The middle bar shows you the median
+* The bottom and top edges of the boxplot show you the lower quartile and the upper quartile. That means 50% of the cases lie inside the box.
+* The bottom and top whiskers show where the bottom 25% of cases and top 25% of cases are on the scale (it's not fully 50%, as the boxplot will also show a few outliers, if any).
+
+```{r plot-35, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = df_qog_21,
+       mapping = aes(x = year,
+                     y = gini,
+                     group = year)) +
+    geom_boxplot() +
+    theme_tufte()
+```
+
+The `ggthemes` package actually has a `geom_` that produces a boxplot based on Tufte's recommendations.
+
+```{r plot-36, fig.height=6, fig.width=9, fig.align='center'}
+df_qog_21 <- df_qog_21 %>%
+    mutate(year = as.character(year))
+ggplot(data = df_qog_21,
+       mapping = aes(x = year,
+                     y = gini,
+                     group = year)) +
+    geom_tufteboxplot() +
+    theme_tufte()
+```
+
+
+# Saving plots
+The easy function to save all your `ggplot2` plots is `ggsave()`. Let's first generate the final plot, as we want to see it in the report, or in the publication. Normally, you don't need to specify `as.numeric()`; I only do it here because we forced the variable to be `character` above (to solve an annoying error in the `geom_tufteboxplot()` function).
+
+```{r plot-37}
+p1 <- ggplot(data = df_qog_21,
+             mapping = aes(x = as.numeric(year),
+                           y = gini,
+                           group = as.numeric(year))) +
+    geom_boxplot(alpha = 0) + # Make box completely transparent
+    theme_solarized_2() +
+    labs(x = "Year",
+         y = "Income inequality",
+         title = "Economic inequality: trends over time")
+```
+
+Save as PDF, for space-saving, and maximum quality (though this can't be added in Word). The defaults sizes are in inches (2.5 cm).
+
+```{r save-01}
+ggsave(p1, file = "../04-graphs/03-01.pdf", height = 6, width = 8)
+```
+
+Save as PNG for decent quality and low space (easily added in Word):
+
+```{r save-02}
+ggsave(p1, file = "../04-graphs/03-02.png", height = 6, width = 8,
+       dpi = 200) # Quality of plot
+```
+
+Increase quality of plot, at the cost of size on hard drive.
+
+```{r save-03}
+ggsave(p1, file = "../04-graphs/03-03.png", height = 6, width = 8,
+       dpi = 400)
+```
+
+Other formats are available as well.
+
+```{r save-04}
+ggsave(p1, file = "../04-graphs/03-04.jpeg", height = 6, width = 8,
+       dpi = 400)
+```

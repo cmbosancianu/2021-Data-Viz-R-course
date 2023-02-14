@@ -1,0 +1,627 @@
+---
+title: "Session 4 Code (day 2)"
+author: "Constantin Manuel Bosancianu"
+date: "May 5, 2021"
+output:
+  rmdformats::downcute:
+    self_contained: true
+    thumbnails: true
+    lightbox: true
+    gallery: false
+    code_folding: hide
+    highlight: pygments
+---
+
+We start off with the same sequence of steps as yesterday, to get us ready for plotting.
+
+
+# Preparations for Plotting
+
+Execute the function below to load a set of packages that we will need - it's the same one we introduced and made use of yesterday,
+
+```{r setup-packages, warning=FALSE, message=FALSE, comment=NA, results='hide'}
+knitr::opts_chunk$set(echo = TRUE,
+                      warning = FALSE,
+                      error = FALSE,
+                      comment = NA,
+                      message = FALSE)
+
+library(pacman)
+p_load(tidyverse, ggthemes, scales, ggrepel, countrycode, zoo)
+```
+
+After this, we also load the same data that we used yesterday.
+
+```{r load-qog-data}
+df_qog_21 <- readRDS(file = "../02-data/01-QoG-2021.rds")
+```
+
+Let's continue today by taking another relationship: the one between resource endowments and democracy. Oil exports are measured here in thousands of barrels exported per day by each country. Gas exports are measured in billions cubic feet exported per year. We will use various measures of democracy to make sure the relationship is consistent. 
+
+
+To keep things manageable, I restrict the sample to the 2012 and 2013 observations. I also add one dichotomous indicator for whether the country is in the Middle East or not, which is not available in the raw data and therefore has to be constructed by hand.
+
+```{r filter-sample}
+df_qog_small <- df_qog_21 %>% 
+  filter(year %in% c(2012, 2013)) %>% 
+  mutate(middleeast = if_else(cname %in% c("Bahrain", "Cyprus (1975-)",
+                                           "Egypt", "Iran", "Iraq",
+                                           "Israel", "Jordan", "Kuwait",
+                                           "Lebanon", "Oman", "Qatar",
+                                           "Saudi Arabia", "Syria",
+                                           "Turkey", "United Arab Emirates",
+                                           "Yemen"), 1, 0))
+
+```
+
+Finally, I take out just the part of the data that I need for plotting.^[In the code sequence, I have to mention explicitly that R should use the `select()` function from the `dplyr` package. If you remember from yesterday, this is because `select()` is an extremely common name for a function in `R`, and we don't want to mistakenly use a function with the same name from a different package, that might do something else.] The last part of the sequence removes all missing data from any of the variables in the data set.
+
+```{r select-needed-vars}
+df_plot <- df_qog_small %>% 
+  dplyr::select(fh_score, cname, vdem_libdem, ross_oil_exp,
+                middleeast) %>% 
+  na.omit()
+```
+
+Start with a scatterplot of the relationship between oil exports and democracy. If you remember from yesterday, scatterplots are obtained with the `geom_point()` function.
+
+```{r plot-01, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = df_plot,
+       mapping = aes(x = ross_oil_exp,
+                     y = fh_score)) +
+    geom_point() +
+    theme_bw() +
+    labs(x = "Oil exports (1,000s of barrels per day)",
+         y = "Freedom House score",
+         title = "Relationship between resource endowments and democracy",
+         caption = "Based on QoG 2021 data (only 2012-2013)")
+```
+
+This kind of plot is just not very helpful for this data configuration. Most countries don't export any oil, meaning that they are all clustered at the 0 value. We can try using categories instead of a continuous measure of oil exports, in that case. We also need to convert again the continuous indicator of democracy into a dichotomous one.
+
+```{r create-categories}
+df_plot <- df_plot %>% 
+    mutate(oil.cat = case_when(ross_oil_exp==0 ~ "0 barrels",
+                               ross_oil_exp > 0 & ross_oil_exp <= 1000 ~ "Less than 1,000,000",
+                               ross_oil_exp > 1000 ~ "More than 1,000,000")) %>% 
+  mutate(demo = case_when(fh_score <= 7 ~ "Non-democracy",
+                          fh_score > 7 ~ "Democracy"))
+```
+
+
+# Faceting
+One way of trying the previous plot in a different manner is to use the categories we just constructed in a box plot. To this type of plot, though, which we have seen already, we have to add a way in which we can distinguish between democracies and non-democracies. Easily done with the `facet_wrap()` function, which creates separate panels based on the type of political system we are dealing with.
+
+```{r plot-02, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = df_plot,
+       mapping = aes(x = oil.cat)) +
+    geom_bar() +
+    theme_bw() +
+    labs(x = "Oil exports",
+         y = "Number of countries") +
+    facet_wrap( ~ demo, # What variables you want to facet by
+               nrow = 1) # How many rows should the figure have
+```
+
+Does this properly convey the message about a potential causal link between natural resource endowments and democracy? Is there perhaps a clearer way of expressing this relationship? Remember: our argument is that the presence of oil influences a country's prospects for democracy.
+
+```{r plot-03, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = df_plot,
+       mapping = aes(x = demo)) +
+    geom_bar() +
+    theme_bw() +
+    labs(x = "Democracy",
+         y = "Number of countries") +
+    facet_wrap( ~ oil.cat, # What variables you want to facet by
+               nrow = 1) # How many rows should the figure have
+```
+
+This time it really jumps out from the graph, though keep in mind that there are only a few cases in the *>1,000,000 barrels per day* category.
+
+If you want to, you can specify another variable before the **~** as well, and then `facet_wrap()` is going to arrange the panels in a grid format.
+
+You can apply faceting to a number of other types of plots as well. As a reminder, that was one of the big advantages of the `ggplot2` approach: once you learn what a layer does, you can usually apply that layer to more than one type of plot. This reduces the amount of functions you have to learn/remember in order to produce a variety of plots.
+
+Below I am taking out just the part of the data that I need for plotting the relationship between GDP per capita and infant mortality. This is an example of a scatterplot where facets can also be applied, so as to distinguish more easily between observations recorded in different years.
+
+```{r plot-04, fig.height=6, fig.width=9, fig.align='center'}
+df_plot <- df_qog_21 %>% 
+    dplyr::select(year, cname, wdi_mortinf, mad_gdppc) %>% 
+    filter(year %in% c(1965, 1975, 1985,
+                       1995, 2005, 2015))
+
+ggplot(data = df_plot,
+       mapping = aes(x = mad_gdppc,
+                     y = wdi_mortinf)) +
+    geom_point(size = 2) +
+    theme_bw() +
+    labs(x = "GDP per capita",
+         y = "Infant mortality") +
+    facet_wrap(~year,
+               nrow = 1)
+```
+
+
+# Using colors
+Using facets is not a must, though, unless you are dealing with a large number of categories that your want to distinguish between. You can achieve the same thing by mapping an additional aesthetic to a variable. In the case of the bar plot, an aesthetic could be color.
+
+## Basics
+I will take out just the part of the data that I need for plotting. We'll do all the data preparation in one go, to show once again the real power of the `dplyr` workflow.
+
+```{r plot-05, fig.height=6, fig.width=9, fig.align='center'}
+df_plot <- df_qog_21 %>% 
+  filter(year == 2012) %>% 
+  dplyr::select(cname, fh_score, vdem_polyarchy, ross_oil_exp) %>% 
+  na.omit() %>% 
+  mutate(oil.cat = case_when(ross_oil_exp==0 ~ "0 barrels",
+                             ross_oil_exp > 0 & ross_oil_exp <= 1000 ~ "Less than 1,000,000",
+                             ross_oil_exp > 1000 ~ "More than 1,000,000"),
+         demo = case_when(fh_score <= 7 ~ "Non-democracy",
+                          fh_score > 7 ~ "Democracy"))
+
+ggplot(data = df_plot,
+       mapping = aes(x = oil.cat,
+                     fill = demo)) +
+    geom_bar(position = "stack") +
+    theme_bw() +
+    labs(x = "Oil exports",
+         y = "Number of countries",
+         caption = "Data limited to 168 observations recorded in 2012")
+```
+
+We can also present them side-by-side, to make sure that there is an aligned scale for all categories. This will make it easier to compare based on the height of the bar across categories.
+
+```{r plot-06, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = df_plot,
+       mapping = aes(x = oil.cat,
+                     fill = demo)) +
+    geom_bar(position = "dodge") +
+    theme_bw() +
+    labs(x = "Oil exports",
+         y = "Number of countries",
+         caption = "Data limited to 168 observations recorded in 2012")
+```
+
+In this case it's not so difficult to see the differences between the *below 1,000,000 barrels* and *above 1,000,000" barrels* category. However, this next trick allows us to really emphasize the difference, by making each of the oil export categories sum up to 100%. For this, we come back briefly to the first bar plot.
+
+```{r plot-07, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = df_plot,
+       mapping = aes(x = oil.cat,
+                     fill = demo)) +
+    geom_bar(position = "fill") +
+    theme_bw() +
+    labs(x = "Oil exports",
+         y = "Share of countries",
+         caption = "Data limited to 168 observations recorded in 2012")
+```
+
+Which plot presents the data in a more convincing way? Which plot is the most *empowering* for the reader? (in the sense of giving them the most information with which to make up their own mind about what the dynamics in the data are)
+
+## Customizing scales
+Before we move away from this topic, I want to talk a bit about how to customize scales. In this last example of a plot, we made the Y-axis a percentage. We can easily control the scale using one of the `scale_y_` functions, such as `scale_y_discrete()` or `scale_y_continuous()`, depending on how the measurement scale for the variable is. In this case, it's continuous.
+
+```{r plot-08, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = df_plot,
+       mapping = aes(x = oil.cat,
+                     fill = demo)) +
+    geom_bar(position = "fill") +
+    theme_bw() +
+    labs(x = "Oil exports",
+         y = "Share of countries",
+         caption = "Data limited to 168 observations recorded in 2012") +
+    scale_y_continuous(labels = scales::percent_format())
+```
+
+In this case, we're accessing the function `percent_format()` from the `scales` package, which automatically formats the Y-axis as a percent. For this to work, the raw metric of the Y-axis has to be expressed on a 0-1 scale; otherwise, we might see percentages like "2500%".
+
+This strategy of using color works for other types of plots as well, and it can be very effective. Look at the relationship between income inequality and the tax burden of a country. Higher values on the variable means a higher degree of fiscal freedom (it's odd, but the formula is indeed computed as 100 - the tax burden on individuals and corporations).
+
+```{r prepare-plot-data}
+df_plot <- df_qog_21 %>% 
+    dplyr::select(cname, year, gini, hf_taxbur, fh_score) %>% 
+    filter(year == 2012) %>%    # Keep only 2012
+    na.omit() %>%               # Remove missing values
+    mutate(demo = case_when(fh_score <= 7 ~ "Non-democracy",
+                            fh_score > 7 ~ "Democracy"))
+```
+
+```{r plot-09, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = df_plot,
+       mapping = aes(x = gini,
+                     y = hf_taxbur)) +
+    geom_point(size = 2) +
+    theme_bw() +
+    labs(x = "Income inequality",
+         y = "Tax burden (reverse coding)") +
+     geom_smooth(method = "loess",
+                 se = FALSE)
+```
+
+The causal mechanism passes through elections, though. The higher the level of inequality, the more people benefit from redistribution, and the higher the vote share for Left parties, which would be expected to increase tax rates. So maybe we need to disaggregate by political system.^[The alternative explanation is a simpler: it's the tax burden that directly shapes inequality.]
+
+```{r plot-10, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = df_plot,
+       mapping = aes(x = gini,
+                     y = hf_taxbur,
+                     color = demo)) + # point have colors instead of fill
+    geom_point(size = 2) +
+    theme_bw() +
+    labs(x = "Income inequality",
+         y = "Tax burden (reverse coding)") +
+     geom_smooth(method = "loess",
+                 se = FALSE)
+```
+
+So far color scales have only been for dichotomous variables, but they work equally well when wanting to map a continuous variable as well. Keep in mind that initially level of democracy was a continuous indicator, which I dichotomized.^[However, with this approach we lose the ability to fit two distinct *loess* lines through the points, as `ggplot2` now can no longer clearly distinguish between two separate groups of points.]
+
+```{r plot-11, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = df_plot,
+       mapping = aes(x = gini,
+                     y = hf_taxbur,
+                     color = fh_score)) +
+    geom_point(size = 2) +
+    theme_bw() +
+    labs(x = "Income inequality",
+         y = "Tax burden (reverse coding)")
+```
+
+You can even control the way the color scale looks like. Just like for "Y", every other mapping has a `scale_[mapping]_[type]()` function associated with it. In the case of the `fh_scale` variable, the needed function is `scale_color_gradient2()` (because we want to only use 2 colors).
+
+```{r plot-12, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = df_plot,
+       mapping = aes(x = gini,
+                     y = hf_taxbur,
+                     color = fh_score)) + 
+  geom_point(size = 2) +
+  theme_bw() +
+  labs(x = "Income inequality",
+       y = "Tax burden (reverse coding)") +
+  scale_color_gradient2(low = muted("blue"), # The color for the lowest value
+                        mid = "gray", # The color for the middle value
+                        midpoint = 5, # The middle point of the scale
+                        high = muted("red")) # The color for the maximum value
+```
+
+We now have the ability to control the color scale. What if we wanted to do the same for a categorical variable? We can easily do this with the `scale_color_manual()` function, since we want to override `ggplot2` defaults and specify custom colors. Take the example below, where we have a dichotomous indicator for democracy. Look at what the legend is telling you: both points and lines have colors associated with them.
+
+```{r plot-13, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = df_plot,
+       mapping = aes(x = gini,
+                     y = hf_taxbur,
+                     color = demo)) +
+    geom_point(size = 3) +
+    theme_bw() +
+    labs(x = "Income inequality",
+         y = "Tax burden (reverse coding)")
+```
+
+We would like now to change these colors. This would be the case either because the report/book you're authoring has to have a specific color scheme in it (institution-specific), or because you want to make it more convenient for readers (e.g. color schemes that are convenient for readers with color-blindness).
+
+```{r plot-14, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = df_plot,
+       mapping = aes(x = gini,
+                     y = hf_taxbur,
+                     color = demo)) +
+    geom_point(size = 3) +
+    theme_bw() +
+    labs(x = "Income inequality",
+         y = "Tax burden (reverse coding)") +
+    scale_color_manual(breaks = c("Democracy","Non-democracy"),
+                       values = c("#E7B800","#D16103"))
+```
+
+
+
+# Using shapes
+Sometimes there are serious restrictions on using colors - this is frequently the case with academic journals. In that case, altering the shape of elements so as to emphasize differences between two subgroups might be a good strategy. I simply continue with the scatterplot above.
+
+```{r plot-15, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = df_plot,
+       mapping = aes(x = gini,
+                     y = hf_taxbur,
+                     shape = demo)) + # This is what has changed
+                                      # compared to the previous plot.
+    geom_point(size = 3) +
+    theme_bw() +
+    labs(x = "Income inequality",
+         y = "Tax burden (reverse coding)")
+```
+
+It's difficult to clearly see the distinction between triangles and circles, particularly when both of them are full. For the sake of clarity, this plot will require a bit of manual tinkering. Just as there was a `scale_color_manual()`, there's also a `scale_shape_manual()`. Here's a convenient list of shapes: [http://www.sthda.com/english/wiki/ggplot2-point-shapes](http://www.sthda.com/english/wiki/ggplot2-point-shapes).
+
+```{r plot-16, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = df_plot,
+       mapping = aes(x = gini,
+                     y = hf_taxbur,
+                     shape = demo)) +
+    geom_point(size = 3) +
+    theme_bw() +
+    labs(x = "Income inequality",
+         y = "Tax burden (reverse coding)") +
+    scale_shape_manual(breaks = c("Democracy","Non-democracy"),
+                       values = c(1, 8),
+                       name = "Political system") # alter the legend title.
+```
+
+Though it makes the plot look a bit too sparse, it has great advantages: if your point is related to non-democracies, the eye is instantly drawn to those. Plus, it doesn't waste much ink on the page, as some of the shapes are hollow.
+
+---
+
+**Small Task**: Remember the line plot from this morning? The one where we computed the trend over time in political equality for each continent, and then plotted it? Please generate two plots by copying the code from this morning and just adjusting it a bit in the same way we did above:
+
+1. Plot 1: assign different colors to the line based on the continent.
+2. Plot 2: assign different shapes to the lines based on the continent.
+
+Try practicing doing these 2 plots in the next 10 minutes or so.
+---
+
+```{r}
+df_qog_small <- df_qog_21 %>% 
+  group_by(continent, year) %>% 
+  summarise(egal = mean(vdem_egal, na.rm = TRUE))
+
+ggplot(data = na.omit(df_qog_small),
+       mapping = aes(x = year,
+                     y = egal,
+                     linetype = continent)) +
+    geom_line(linewidth = 2) +
+    theme_bw()
+```
+
+
+We can easily alter shapes, but what if we want to map a continuous variable? This is what we did before with the color gradient. Thankfully, there's one more dimension we can alter, and this maps perfectly to a continuous variable: the size of the points.
+
+```{r plot-17, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = df_plot,
+       mapping = aes(x = gini,
+                     y = hf_taxbur,
+                     size = fh_score)) +
+    geom_point(shape = 1) + # I had to remove the size specification here,
+                            # otherwise nothing would have changed. However, I
+                            # wanted to use less ink, so I used hollow circles
+    theme_bw() +
+    labs(x = "Income inequality",
+         y = "Tax burden (reverse coding)")
+```
+
+
+
+# Annotating plots
+We're going to start with a new data set now, but we're going to *enhance* it a bit, by bringing in the country-level variables from the QoG data we've been using so far. This will illustrate a procedure that you'll need to perform frequently: *merging*, or bringing together data from multiple disparate sources so as to construct a plot.
+
+In order to have all the elements we need to merge information from the ESS with that from the QoG, we first need a variable that designates the country's full name in the ESS.
+
+```{r load-ess-data}
+rm(df_plot, df_qog_small)
+
+df_ess <- readRDS(file = "../02-data/02-ESS-2018-snip.rds")
+df_ess <- df_ess %>% 
+    rename(ccode = cntry) %>% # Rename variable so it's same as QoG data
+    mutate(year = 2018,
+           ccode = as.character(ccode)) %>% 
+    mutate(cname = countrycode(sourcevar = ccode, # Input variable
+                               origin = "iso2c", # Input format
+                               destination = "country.name")) # Output format
+```
+
+And now, with the `left_join()` function from `dplyr`, we will bring all the country-level variables from QoG into the ESS data. Because the ESS data is from 2018, some of the variables in the QoG might not yet have observations for this year, which is why I take the 2017 values here.^[The only exception to this is information on religious fractionalization, where 2016 is the last year with valid information.] Before that, we have to make sure that the country names match correctly between the two data sets.
+
+```{r merge-ess-qog}
+df_qog_21 <- df_qog_21 %>% 
+    mutate(cname = recode(cname,
+                          "Czech Republic" = "Czechia",
+                          "France (1963-)" = "France")) %>% 
+  group_by(cname) %>% 
+  mutate(al_religion2000 = mean(al_religion2000, na.rm = TRUE)) %>% 
+  filter(year == 2017) %>%
+  dplyr::select(-year)
+
+df_ess <- left_join(df_ess, 
+                    dplyr::select(df_qog_21, -ccode), 
+                    by = c("cname"))
+```
+
+Given that we'll use this during plotting, we also create a variable that refers to whether the country is formerly Communist or not. Unfortunately, we can't name a distinction here between East and West Germany, so I coded *Germany* as not Communist.
+
+```{r final-recoding}
+df_ess <- df_ess %>% 
+    mutate(postcom = if_else(cname %in% c("Czechia","Estonia","Hungary",
+                                          "Lithuania","Poland","Montenegro",
+                                          "Slovenia","Croatia","Latvia",
+                                          "Serbia","Slovakia"), 1, 0))
+
+rm(df_qog_21)
+```
+
+One way of making some annotations to a plot, say a scatterplot, is to label the points directly. I am interested in looking at belief that immigration enriches the cultural life of a country. First, I have to create a summary data set, with information at the country level.
+
+```{r compute-plot-quantities}
+df_ess_small <- df_ess %>% 
+  group_by(cname) %>% # Split data by country, and then...
+  summarise(im.cult = weighted.mean(imueclt, w = pweight, na.rm = TRUE),
+            relig.div = mean(al_religion2000, na.rm = TRUE),
+            gdp.cap = mean(mad_gdppc, na.rm = TRUE),
+            gini = mean(gini, na.rm = TRUE),
+            post.comm = mean(postcom, na.rm = TRUE),
+            ccode = ccode[1]) %>%
+  mutate(post.comm = as.factor(post.comm))
+```
+
+This last section above summarizes the data, by computing means at the country level for a few variables. In fact, only the first one (`im.cult`) is a true mean. The rest are just the country-level variables we took from the QoG.
+
+```{r plot-18, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = df_ess_small,
+       mapping = aes(x = relig.div,
+                     y = im.cult)) +
+    geom_point(size = 3) +
+    theme_bw() +
+    labs(x = "Religious fractionalization",
+         y = "Immigration enriches cultural life")
+```
+
+The `ggrepel` package has a few functions that make this annotation very easy.
+
+```{r plot-19, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = df_ess_small,
+       mapping = aes(x = relig.div,
+                     y = im.cult,
+                     label = cname)) + # Have to add what the text for
+                                       # the labels is.
+    geom_point(size = 3) +
+    geom_text_repel() + # The labeling function
+    theme_bw() +
+    labs(x = "Religious fractionalization",
+         y = "Immigration enriches cultural life")
+```
+
+It may not be immediately obvious, but `ggrepel` is trying to arrange the text so that there is no overlap of labels, for maximum legibility.
+
+If you're not too concerned about precision, you can even leave out the points themselves, and use the text itself as a position marker.
+
+```{r plot-20, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = df_ess_small,
+       mapping = aes(x = relig.div,
+                     y = im.cult,
+                     label = cname)) +
+    geom_text() + # Using "geom_text()" from the "ggplot2" package
+    theme_bw() +
+    labs(x = "Religious fractionalization",
+         y = "Immigration enriches cultural life")
+```
+
+The text will be centered on the position of the country. You can see that abandoning `geom_text_repel()` means that labels now overlap. This, however, is the price we have to pay for precise position (since `geom_text_repel()` would have moved the labels around). We can quickly address this by using the country code; the shorter text makes it less likely for the text to overlap.
+
+```{r plot-21, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = df_ess_small,
+       mapping = aes(x = relig.div,
+                     y = im.cult,
+                     label = ccode)) +
+    geom_text() +
+    theme_bw() +
+    labs(x = "Religious fractionalization",
+         y = "Immigration enriches cultural life")
+```
+
+Some might be disappointed that because of giving up on the points, we lose the ability to alter their shape, color, or size. While that's true for shape, it's not true for both color and size.
+
+```{r plot-22, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = df_ess_small,
+       mapping = aes(x = relig.div,
+                     y = im.cult,
+                     label = cname,
+                     color = post.comm)) + # Have to specify color here
+    geom_text() +
+    theme_bw() +
+    labs(x = "Religious fractionalization",
+         y = "Immigration enriches cultural life")
+```
+
+---
+
+**Small Task**: Just as we did for a previous plot, where we manually changed the color of the text, please look into the `scale_color_manual()` function and find a way to change **0** and **1** into proper labels: *Not post-communist* and *Post-communist*.
+
+---
+
+We can even use a continuous mapping for color, and it would still work fine, though it's a bit harder to distinguish shades of a color.
+
+```{r plot-23, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = df_ess_small,
+       mapping = aes(x = relig.div,
+                     y = im.cult,
+                     label = cname,
+                     color = gdp.cap)) + # Have to specify color here
+    geom_text() +
+    theme_bw() +
+    labs(x = "Religious fractionalization",
+         y = "Immigration enriches cultural life") +
+    scale_color_gradient2()
+```
+
+Instead of color, we can use the same trick with the size of the points, only that this will now become the size of the text.
+
+```{r plot-24, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = df_ess_small,
+       mapping = aes(x = relig.div,
+                     y = im.cult,
+                     label = cname,
+                     size = gdp.cap)) + # Have to specify size here
+    geom_text() +
+    theme_bw() +
+    labs(x = "Religious fractionalization",
+         y = "Immigration enriches cultural life")
+```
+
+The problem, of course, is that a few wealthy countries are pulling the scale towards that extreme, making poorer countries hard to distinguish from each other (and hard to read as well).
+
+```{r plot-25, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = df_ess_small,
+       mapping = aes(x = relig.div,
+                     y = im.cult,
+                     label = cname,
+                     size = gdp.cap)) +
+    geom_text() +
+    scale_size(range = c(3, 6)) + # This will control the range of the scale.
+    theme_bw() +
+    labs(x = "Religious fractionalization",
+         y = "Immigration enriches cultural life")
+```
+
+You can also add small snippets of text on the plot, if you want to highlight a particular feature in the data.^[A little bit like that tweet from Donald Trump, if you remember the slides from yesterday.] For this, you don't need to label all points anymore - just the ones you want to draw the attention of the audience to.
+
+```{r plot-26, fig.height=6, fig.width=9, fig.align='center'}
+p2 <- ggplot(data = df_ess_small,
+       mapping = aes(x = relig.div,
+                     y = im.cult,
+                     label = cname,
+                     color = post.comm)) +
+    geom_text() +
+    theme_bw() +
+    labs(x = "Religious fractionalization",
+         y = "Immigration enriches cultural life") +
+    annotate(geom = "text", # Place text on plot
+             x = 0.58, # X-coordinate of the text
+             y = 4.2, # Y-coordinate of the text
+             label = "Potentially interesting cases") # Text
+
+p2
+```
+
+You can even emphasize them with a shaded area, to draw even further attention to them. If you can see below, to define this shaded area you have to manually input the coordinates of the 4 corners of the rectangle.
+
+```{r plot-27, fig.height=6, fig.width=9, fig.align='center'}
+p2 + annotate(geom = "rect", # Shape of the shaded area
+              xmin = 0.48, # Coordinates of the area
+              xmax = 0.69,
+              ymin = 3.5,
+              ymax = 4.1,
+              fill = "blue", # Fill color for the area
+              alpha = 0.25) # Transparency for area
+```
+
+Finally, you can draw specific lines on the plot, to highlight thresholds or specific areas. For example, say that you've been meaning to make visually clear which countries are above the average level of support for immigration (in terms of cultural gains). The simplest thing is to highlight the mean with a line.
+
+```{r plot-28, fig.height=6, fig.width=9, fig.align='center'}
+# mean(esssmallDF$im.cult)
+
+p2 + geom_hline(yintercept = 5.4557,
+                size = 1.5,
+                linetype = "dotdash",
+                color = muted("red"))
+```
+
+A similar function exists for drawing a vertical line at a specific location on the plot.
+
+```{r plot-29, fig.height=6, fig.width=9, fig.align='center'}
+# mean(esssmallDF$relig.div, na.rm = TRUE)
+
+p2 + geom_vline(xintercept = 0.4076,
+                size = 1.5,
+                linetype = "dotdash",
+                color = muted("red"))
+```
+
+---
+
+**Small Task**: `ggplot2` also allows you to draw a line with any angle you would like. Please use `p2` and draw a diagonal line across the plot, an an 45 degree angle. Use any color, size and line type you prefer.
+
+---

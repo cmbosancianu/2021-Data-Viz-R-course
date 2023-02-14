@@ -1,0 +1,501 @@
+---
+title: "Session 6 Code (day 3)"
+author: "Constantin Manuel Bosancianu"
+date: "May 6, 2021"
+output:
+  rmdformats::downcute:
+    self_contained: true
+    thumbnails: true
+    lightbox: true
+    gallery: false
+    code_folding: hide
+    highlight: pygments
+---
+
+In this last session, we go over a few options available to you for graphically presenting to a variety of audiences output from statistical models.
+
+# Preparations for Plotting
+
+Same function as we used earlier today: checks for package installations, and if not on the hard drive, then installs and loads them.
+
+```{r setup-packages, warning=FALSE, message=FALSE, comment=NA, results='hide'}
+knitr::opts_chunk$set(echo = TRUE,
+                      warning = FALSE,
+                      error = FALSE,
+                      comment = NA,
+                      message = FALSE)
+
+library(pacman)
+p_load(car, tidyverse, broom, ggeffects, texreg, scales, snakecase)
+```
+
+Load up the data used in this session. We were actually introduced to this data yesterday: a data set from the 9th wave of the European Social Survey.
+
+```{r load-qog-data}
+df_ess <- readRDS(file = "../02-data/02-ESS-2018-snip.rds")
+```
+
+
+# Running a small OLS regression
+I will subset the data just for Germany, and do a little bit of data cleaning for the model.
+
+```{r subset-data}
+df_de <- df_ess %>% 
+    mutate(cntry = as.character(cntry)) %>% 
+    filter(cntry == "DE") # Subsetting happening here
+```
+
+I want to focus on the two variables that refer to attitudes toward immigration. Out of these I've decided to create an additive index, that will go from 0 to 20. Visualizing the outcome shows that it's slightly negatively skewed, though for the sake of the example we'll continue with the way the variable is distributed here.
+
+```{r plot-01, fig.height=6, fig.width=9, fig.align='center'}
+df_de <- df_de %>% 
+    mutate(att.imm = imbgeco + imueclt)
+
+ggplot(df_de, aes(x = att.imm)) +
+    geom_bar() +
+    theme_bw()
+```
+
+Next, we move on to cleaning up a few of the predictors. We can do this all in one pipeline through `dplyr`, as we did in the previous sessions.
+
+```{r clean-predictors-1}
+df_de <- df_de %>% 
+    mutate(male = if_else(gndr == 1, 1, 0),
+           age.dec = agea / 10,
+           edulvl = case_when(edulvlb==0 ~ 0,
+                              edulvlb >= 100 & edulvlb < 200 ~ 1,
+                              edulvlb >= 200 & edulvlb < 300 ~ 2,
+                              edulvlb >= 300 & edulvlb < 400 ~ 3,
+                              edulvlb >= 400 & edulvlb < 500 ~ 4,
+                              edulvlb >= 500 & edulvlb < 600 ~ 5,
+                              edulvlb >= 600 & edulvlb < 700 ~ 6,
+                              edulvlb >= 700 & edulvlb < 800 ~ 7,
+                              edulvlb >= 800 ~ 8),
+           region = as.character(region),
+           region = str_trim(region),
+           east = if_else(region %in% c("DE4", "DE8", "DED", "DEE", "DEG"),
+                          1, 0),
+           uemp5yr = if_else(uemp5yr == 2, 0, 1),
+           walk_safe = if_else(aesfdrk %in% c(1,2), 1, 0)) %>% 
+    dplyr::select(-region)
+```
+
+A few notes on the way these predictors are coded:
+
+1. `att.imm`: Belief regarding how good immigration is for country. Higher values denote more support for immigration;
+2. `lrscale`: Left-Right scale. Higher values on this indicator denote a more rightward view;
+3. `ppltrst`: Trust in people. Higher values on the indicator denote more trust in people (0 = can't be too careful; 10 = most people can be trusted);
+4. `age.dec`: Age (measured in decades);
+5. `east`: Respondent from one of the states formerly belonging to East Germany (0 = Former West Germany; 1 = Former East Germany);
+6. `edulvl`: Highest educational level: 0 = no ISCED 1 (primary); ... 8 = ISCED 6 (doctoral degree);
+7. `male`: Gender (0 = woman; 1 = man);
+8. `uemp5yr`: Unemployment spell in the previous 5 years (0 = no; 1 = yes);
+9. `walk_safe`: Feel safe walking area at night (0 = unsafe; 1 = safe).
+
+Before getting started in earnest, let's make sure this model, and the one we run after this, are estimated on the same data, by doing listwise deletion.
+
+```{r select-final-predictors}
+df_de <- df_de %>% 
+    dplyr::select(ppltrst:walk_safe, hinctnta, lrscale) %>% 
+    na.omit()
+```
+
+Start by running a model with basic socio-demographic controls.
+
+```{r model-1}
+model1 <- lm(att.imm ~ male + age.dec + edulvl + hinctnta + east,
+             data = df_de)
+```
+
+Until now, the typical way of displaying model results would have been something similar to this. This is not a bad way of conveying results, and it will definitely be required in an academic outlet (even if only in the appendix). However, for a lay audience, it tends to be confusing: numbers in brackets, stars, fit measures etc.
+
+```{r display-model-1, results='asis'}
+htmlreg(model1,
+        digits = 3,
+        single.row = TRUE,
+        custom.model.names = "DV: Immigration good",
+        custom.coef.names = c("(Constant)","Gender: male","Age (decades)",
+                              "Education level","Income (deciles)",
+                              "East Germany resident"),
+        caption = "Model with basic socio-demographic controls",
+        caption.above = TRUE,
+        head.tag = FALSE, body.tag = FALSE, inline.css = TRUE,
+        doctype = FALSE, html.tag = FALSE)
+```
+
+```{r display-model-1-alternative, eval=FALSE}
+screenreg(model1,
+          digits = 3,
+          single.row = TRUE,
+          custom.model.names = "DV: Immigration good",
+          custom.coef.names = c("(Constant)","Gender: male","Age (decades)",
+                                "Education level","Income (deciles)",
+                                "East Germany resident"))
+```
+
+
+# Coefficient plots
+In the past, this process used to be done by *manually* going into the regression output object and extracting the needed coefficients and standard errors, and storing them in a data set. It was this data set that was then used for plotting. These days, however, a lot of this work is automated through the `broom` package.
+
+```{r present-tidy-output}
+regout <- tidy(model1, # Regression output object
+               conf.int = TRUE) # Want to extract CIs as well
+regout
+```
+
+```{r plot-02, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = regout,
+       mapping = aes(x = term,
+                     y = estimate)) +
+    geom_point(size = 3,
+               color = muted("red")) + # "muted()" is in "scales" library.
+    theme_bw()
+```
+
+We plotted the coefficients, but we would still need to be completely honest with the reader and depict the confidence intervals. Thankfully, `broom` automatically extracted that information when we asked for it.
+
+```{r plot-03, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = regout,
+       mapping = aes(x = term,
+                     y = estimate,
+                     ymin = conf.low, # Lower bound of CI
+                     ymax = conf.high)) + # Upper bound of CI
+  geom_pointrange(color = muted("red"), # Use "pointrange" to depict the CIs as well
+                  linewidth = 1.1) +
+  theme_bw()
+```
+
+We're running into a problem: the estimate for the intercept is so large, that it *stretches* the Y-scale, making the confidence intervals for the other coefficients virtually invisible. If this had happened to one of the other estimates we would have been in trouble. Thankfully, though, the intercept is not a very important quantity to report, so we can leave it out of the next plot.
+
+We only need a few additional elements to make the plot stand out. First, a quick line drawn at 0, so as to better see which are the coefficients that are not statistically significant. Second, some nicer names for the predictors. Third, flipping the scales by 90 degrees, so as to read the plot from top to bottom, in the same way as one would read a regression table.
+
+```{r plot-04, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = subset(regout, !(regout$term == "(Intercept)")),
+       mapping = aes(x = term,
+                     y = estimate,
+                     ymin = conf.low,
+                     ymax = conf.high)) +
+    geom_pointrange(color = muted("red"),
+                    size = 1.1) +
+    theme_bw() +
+    geom_hline(yintercept = 0, # Drawing a quick horizontal line.
+               linetype = "dashed",
+               linewidth = 1.5) +
+    scale_x_discrete(breaks = c("male", "age.dec", "edulvl",
+                                "hinctnta", "east"),
+                     labels = c("Gender: male", "Age (in decades)",
+                                "Education level", "Household income (deciles)",
+                                "East Germany")) +
+    coord_flip() + # Flip the coordinates by 90 degrees
+    labs(x = "Predictor",
+         y = "Estimate",
+         title = "Explaining support for immigration in Germany",
+         caption = "Data: European Social Survey, wave 9 (2018)")
+```
+
+The `scale_x_discrete()` function was used here because the X-axis was a discrete one (the names of the predictors in the models). All I did for this function to work was to give it the breaks and assign a label for each of the breaks.
+
+---
+
+**Small Task**: The plot depicts estimates, but leaves out vital information about model fit, as well as sample size. Using the knowledge you got in the previous days about how to annotate plots, can you add these two pieces of information to the plot? (if you want to see how to format "R^2" in a nice way, take a look at the advice offered here: [https://stackoverflow.com/questions/35777418/adding-equations-to-ggplots-in-r](https://stackoverflow.com/questions/35777418/adding-equations-to-ggplots-in-r).
+
+---
+
+What if we'd like to show more than one model on the coefficient plot, in a comparative fashion? We run here an additional model, with a few more predictors.
+
+```{r model-2, results='asis'}
+rm(regout)
+
+model2 <- lm(att.imm ~ male + age.dec + edulvl + hinctnta + east + 
+                 ppltrst + lrscale + walk_safe + uemp5yr,
+             data = df_de)
+
+htmlreg(list(model1, model2),
+        digits = 3,
+        single.row = FALSE,
+        custom.model.names = c("Model 1", "Model 2"),
+        custom.coef.names = c("(Constant)", "Gender: male", "Age (decades)",
+                              "Education level", "Income (deciles)",
+                              "East Germany resident", "Trust in people",
+                              "Left-Right scale", "Feel safe in area",
+                              "Experienced unemployment"),
+        caption = "Model comparison table",
+        caption.above = TRUE,
+        head.tag = FALSE, body.tag = FALSE, inline.css = TRUE,
+        doctype = FALSE, html.tag = FALSE)
+```
+
+```{r model-2-display-alternative, eval=FALSE}
+screenreg(list(model1, model2),
+          digits = 3,
+          single.row = FALSE,
+          custom.model.names = c("Model 1", "Model 2"),
+          custom.coef.names = c("(Constant)", "Gender: male", "Age (decades)",
+                                "Education level", "Income (deciles)",
+                                "East Germany resident", "Trust in people",
+                                "Left-Right scale", "Feel safe in area",
+                                "Experienced unemployment"))
+```
+
+For getting a comparison plot, we'll have to work a bit, but not particularly hard. First, extract both sets of coefficients. Second, make sure each model has an indicator variable that makes it clear which model the estimate belongs to. Third, merge the two data frames to produce the final plotting data.
+
+```{r prepare-tidy-output}
+regout1 <- tidy(model1,
+                conf.int = TRUE)
+regout2 <- tidy(model2,
+                conf.int = TRUE)
+
+regout1$model <- "model 1"
+regout2$model <- "model 2"
+
+regout <- rbind(regout1, regout2)
+rm(regout1, regout2)
+```
+
+Finally, adapt a bit the previous plot we used, to account for the fact that we now have two models to plot.
+
+```{r plot-05, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = subset(regout, !(regout$term == "(Intercept)")),
+       mapping = aes(x = term,
+                     y = estimate,
+                     ymin = conf.low,
+                     ymax = conf.high,
+                     color = model)) + # Assign color by the specific model
+    geom_pointrange(position = position_dodge(width = 0.5),
+                    linewidth = 1.1) +
+    # Above, we have to space out the points a bit using
+    # "position_dodge()", otherwise the CIs might overlap to a great
+    # extent.
+    theme_bw() +
+    geom_hline(yintercept = 0,
+               linetype = "dashed",
+               linewidth = 1.5) +
+    scale_x_discrete(breaks = c("male", "age.dec", "edulvl",
+                                "hinctnta", "east", "ppltrst", "lrscale",
+                                "walk_safe", "uemp5yr"),
+                     labels = c("Gender: male", "Age (in decades)",
+                                "Education level", "Household income (deciles)",
+                                "East Germany","Trust in people","Left-Right scale",
+                                "Feel safe in area", "Experienced unemployment")) +
+    coord_flip() +
+    labs(x = "Predictor",
+         y = "Estimate",
+         title = "Explaining support for immigration in Germany",
+         caption = "Data: European Social Survey, wave 9 (2018)")
+```
+
+---
+
+**Small Task**: `ggplot2` is arranging the coefficients on the plot in a bit of a mixed fashion. Could you use the code covered in one of the previous days to force `ggplot2` to organize the coefficients in a specific order on the axis? (you can decide whichever order you find most intuitive).
+
+---
+
+# Running models on sub-groups
+What if you want to run the same model across multiple sub-groups in the data, and plot coefficients? With a bit of `dplyr` work, we can do this in a few quick steps.
+
+First, do the same type of recoding on the larger data set.
+
+```{r clean-predictors-2}
+rm(regout, df_de, model1, model2)
+
+df_ess_small <- df_ess %>% 
+    mutate(att.imm = imbgeco + imueclt, 
+           male = if_else(gndr == 1, 1, 0),
+           age.dec = agea / 10,
+           edulvl = case_when(edulvlb == 0 ~ 0,
+                              edulvlb >= 100 & edulvlb < 200 ~ 1,
+                              edulvlb >= 200 & edulvlb < 300 ~ 2,
+                              edulvlb >= 300 & edulvlb < 400 ~ 3,
+                              edulvlb >= 400 & edulvlb < 500 ~ 4,
+                              edulvlb >= 500 & edulvlb < 600 ~ 5,
+                              edulvlb >= 600 & edulvlb < 700 ~ 6,
+                              edulvlb >= 700 & edulvlb < 800 ~ 7,
+                              edulvlb >= 800 ~ 8),
+         region = as.character(region),
+         region = str_trim(region),
+         east = if_else(region %in% c("DE4", "DE8", "DED", "DEE", "DEG"), 1, 0),
+         uemp5yr = if_else(uemp5yr == 2, 0, 1),
+         walk_safe = if_else(aesfdrk %in% c(1, 2), 1, 0)) %>% 
+    dplyr::select(cntry, att.imm:edulvl) %>% 
+    na.omit()
+```
+
+Second, create a custom function for running that regression.
+
+```{r custom-reg-function}
+fit_ols <- function(df) {
+    lm(att.imm ~ male + age.dec + edulvl,
+       data = df)
+}
+```
+
+Now, we run the model on each of the subgroups. In this case, I will run the same model in each of the countries that participated in the ESS. `nest()` is available from the `tidyr` package, while `map()` is available from the `purrr` package.
+
+```{r apply-model-groups}
+out.reg <- df_ess_small %>%
+    group_by(cntry) %>%
+    nest() %>% # Similar to "group_by()"
+    mutate(model = map(data, fit_ols))
+head(out.reg)
+```
+
+From each of the model outputs that has been stored, extract the coefficients using the same `tidy()` function as we used above. Then just unnest the list, and extract the needed model output from it.
+
+```{r clean-results-regression}
+out.sum <- out.reg %>%
+  mutate(tidied = map(model, tidy, conf.int = TRUE)) %>%  # Extract tidy output
+  unnest(tidied) %>% # Transform list into data frame
+  filter(!(term == "(Intercept)")) # Again, remove intercept
+head(out.sum)
+```
+
+Finally, I plot the actual coefficients. Instead of using colors, which might have been a bit too much, I used facets.
+
+```{r plot-06, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = out.sum,
+       mapping = aes(x = cntry,
+                     y = estimate,
+                     ymin = conf.low,
+                     ymax = conf.high)) +
+  geom_pointrange() +
+  geom_hline(yintercept = 0,
+             color = muted("red"),
+             linetype = "dashed") +
+  facet_wrap(~term, ncol = 1) +
+  theme_bw()
+rm(esstrimDF)
+```
+
+**Quick question**: If you wanted to also assign different colors to the coefficients depending on whether they are statistically significant or not, how would you go about doing this?
+
+
+# Plot marginal effects
+Instead of showing raw coefficients, you can choose to present the actual levels in the outcome that would be observed if we vary key predictors by specific amounts. Kieran Healy recommends the `margins` package, but in the meantime this has been put on hold. What I show you here is the `ggeffects` package.
+
+Though the bit of code below might be the longest pipe sequence we wrote, it's worth taking a step back and realizing the power of `dplyr`: we just went, in about 20 lines, through: (1) data subsetting, (2) computing new indicators, (3) variable recoding, (4) selecting needed indicators, and (5) listwise deletion.
+
+```{r clean-predictors-3}
+df_de <- df_ess %>%
+  mutate(cntry = as.character(cntry)) %>% 
+  filter(cntry == "DE") %>% 
+  mutate(att.imm = imbgeco + imueclt, 
+         male = if_else(gndr == 1, 1, 0),
+         age.dec = agea / 10,
+         edulvl = case_when(edulvlb == 0 ~ 0,
+                            edulvlb >= 100 & edulvlb < 200 ~ 1,
+                            edulvlb >= 200 & edulvlb < 300 ~ 2,
+                            edulvlb >= 300 & edulvlb < 400 ~ 3,
+                            edulvlb >= 400 & edulvlb < 500 ~ 4,
+                            edulvlb >= 500 & edulvlb < 600 ~ 5,
+                            edulvlb >= 600 & edulvlb < 700 ~ 6,
+                            edulvlb >= 700 & edulvlb < 800 ~ 7,
+                            edulvlb >= 800 ~ 8),
+         region = as.character(region),
+         region = str_trim(region),
+         east = if_else(region %in% c("DE4", "DE8", "DED", "DEE", "DEG"),
+                        1, 0),
+         uemp5yr = if_else(uemp5yr == 2, 0, 1),
+         walk_safe = if_else(aesfdrk %in% c(1,2), 1, 0)) %>% 
+  dplyr::select(ppltrst, uemp5yr:walk_safe, hinctnta, lrscale) %>% 
+  na.omit()
+```
+
+Now we run the model with the full set of predictors.
+
+```{r model-3}
+model3 <- lm(att.imm ~ male + age.dec + edulvl + hinctnta + east + 
+                 ppltrst + lrscale + walk_safe + uemp5yr,
+             data = df_de)
+```
+
+I'm interested particularly in presenting the effect of trust in people on support for immigration. The `ggpredict()` function can help us here, by using the data set with observations on our predictors and the estimated coefficients to produce predicted values of the outcome at each level of the trust in people indicator.
+
+```{r predict-outcome-1}
+my_pred <- ggpredict(model3, # Model output object
+                     terms = "ppltrst") # Predictor to focus on
+my_pred
+```
+
+The exported object is always in a *tidy* format, so it's easy to extract what we need from it.
+
+```{r plot-07, fig.height=6, fig.width=9, fig.align='center'}
+ggplot(data = my_pred,
+       mapping = aes(x = x,
+                     y = predicted,
+                     ymin = conf.low,
+                     ymax = conf.high))  +
+    geom_pointrange()  +
+    theme_bw() +
+    scale_x_continuous(breaks = c(0, 1, 2, 3, 4, 5,
+                                  6, 7, 8, 9, 10),
+                       labels = c("0", "1", "2", "3", "4", "5",
+                                  "6", "7", "8", "9", "10"))  +
+    labs(x = "Trust in other people",
+         y = "Predicted support for immigration")
+```
+
+Keep in mind: you're not actually plotting coefficients here, but rather levels of the dependent variable.
+
+We follow up on this with a slightly more complicated quantity: marginal effects depending on the level of another variable.
+
+```{r model-4, results='asis'}
+model4 <- lm(att.imm ~ male + age.dec + edulvl + hinctnta + east + 
+                 ppltrst + lrscale + walk_safe + uemp5yr + ppltrst*male,
+             data = df_de)
+
+htmlreg(model4,
+        digits = 3,
+        single.row = TRUE,
+        custom.model.names = c("Model 1"),
+        custom.coef.names = c("(Constant)", "Gender: male", "Age (decades)",
+                              "Education level", "Income (deciles)",
+                              "East Germany resident", "Trust in people",
+                              "Left-Right scale", "Feel safe in area",
+                              "Experienced unemployment",
+                              "Trust * Gender"),
+        caption = "Model with interaction term",
+        caption.above = TRUE,
+        head.tag = FALSE, body.tag = FALSE, inline.css = TRUE,
+        doctype = FALSE, html.tag = FALSE)
+```
+
+```{r model-4-display-alternative, eval=FALSE}
+screenreg(model4,
+          digits = 3,
+          single.row = TRUE,
+          custom.model.names = c("Model 1"),
+          custom.coef.names = c("(Constant)", "Gender: male", "Age (decades)",
+                                "Education level", "Income (deciles)",
+                                "East Germany resident", "Trust in people",
+                                "Left-Right scale", "Feel safe in area",
+                                "Experienced unemployment",
+                                "Trust * Gender"))
+```
+
+With the code below, I ask `ggpredict()` to only focus on 3 specific values of trust in other people.
+
+```{r predict-outcome-2}
+my_pred <- ggpredict(model4, # Model output object
+                     terms = c("male", "ppltrst[0,5,10]")) # Predictor to focus on
+my_pred
+```
+
+```{r plot-08, fig.height=6, fig.width=6, fig.align='center'}
+ggplot(data = my_pred,
+       mapping = aes(x = x,
+                     y = predicted,
+                     ymin = conf.low,
+                     ymax = conf.high,
+                     color = group, # Present different colors
+                     group = group))  +
+  geom_pointrange()  +
+  geom_line() +
+  theme_bw() +
+  scale_x_continuous(breaks = c(0, 1),
+                     labels = c("Women", "Men"))  +
+  labs(x = "Gender",
+       y = "Predicted support for immigration") +
+  scale_color_discrete(name = "Trust",
+                       breaks = c(0, 5, 10),
+                       labels = c("Low", "Average", "High"))
+```

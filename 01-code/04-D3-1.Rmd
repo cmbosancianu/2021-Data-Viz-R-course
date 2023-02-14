@@ -1,0 +1,382 @@
+---
+title: "Session 5 Code (day 3)"
+author: "Constantin Manuel Bosancianu"
+date: "May 6, 2021"
+output:
+  rmdformats::downcute:
+    self_contained: true
+    thumbnails: true
+    lightbox: true
+    gallery: false
+    code_folding: hide
+    highlight: pygments
+---
+
+In this session, we go over a few tricks related to how to plot maps in R, with the help of `ggplot2` and a few other packages. The section will be split into two. First, I show how to use standard `ggplot2` functions with the `maps` package to produce some maps of standard areas: United States, European countries, etc. Second, I show how to use the `ggmap` package to produce a map of any area that is currently indexed through Google Maps.
+
+The reason why only part of the session is devoted to `ggmap` is that since summer 2018 `ggmap` requires users to open a paid account with Google (this is a change brought about by Google). Each query to the Google Maps API is then charged to the user's account. This account is given a monthly limit of 200 USD worth of queries for free, after which the account gets billed.^[Although we would never risk getting close to 200 USD, I did not want to make you open the account during the session and going through this hassle.] This is why I have downloaded the map we will use from Google using my account, and have distributed it here as an R object.^[I have, however, included the code that you could use to download the map yourselves, if you are willing to open a paid account with Google.]
+
+
+# Preparations for Plotting
+
+We deploy the same function as we used yesterday: it checks for package installations, and if these are not installed on the hard drive, then it installs and loads them.
+
+```{r setup-packages, warning=FALSE, message=FALSE, comment=NA, results='hide'}
+knitr::opts_chunk$set(echo = TRUE,
+                      warning = FALSE,
+                      error = FALSE,
+                      comment = NA,
+                      message = FALSE)
+
+library(pacman)
+p_load(tidyverse, ggmap, sp, sf, raster, ggspatial, countrycode)
+```
+
+We used yesterday some data from the Quality of Governance Institute. We can load it once more in `R`'s memory and only use only part of the sample that covers European countries.
+
+```{r load-qog-data}
+df_qog_21 <- readRDS(file = "../02-data/01-QoG-2021.rds")
+```
+
+We again rely on functions from `dplyr` to easily select the data only from European countries, and only for 2016. Before we do that, we have to make sure that we recode Turkey as an European country, and correct the name for Cyprus.
+
+```{r subset-qog-data}
+df_qog_21 <- df_qog_21 %>% 
+  mutate(continent = if_else(cname == "Turkey", "Europe", continent),
+         cname = recode(cname,
+                        "Cyprus (1975-)" = "Cyprus",
+                        "France (1963-)" = "France"),
+         continent = if_else(cname == "Cyprus", "Europe", continent))
+
+df_eu_16 <- df_qog_21 %>%
+  filter(continent == "Europe" & year == 2016) %>% 
+  dplyr::select(-continent, -year)
+```
+
+
+# Getting maps
+It's possible to use a dedicated package, like `rworldmap`, and just restrict it to the contours of the continent. However, while that's fast in terms of getting the world map, it takes some trial and error to figure out the contours.
+
+The alternative is to obtain a custom-designed map of the entity you're interested in. Though it's not available in all cases, this is by far the path that produces the best-looking results. For Europe, you can download the data by select NUTS level from the Eurostat website: [https://ec.europa.eu/eurostat/web/gisco/geodata/reference-data/administrative-units-statistical-units/nuts](https://ec.europa.eu/eurostat/web/gisco/geodata/reference-data/administrative-units-statistical-units/nuts).^[The data is offered in multiple projections, so you have to pay around with things a bit to make sure you downloaded the projection you wanted.]
+
+Read in data using the `st_read()` function from the `sf` package.
+
+```{r read-shapefile}
+shp_eu <- st_read(dsn = "../02-data/NUTS_RG_03M_2021_4326_LEVL_0.shp",
+                  quiet = TRUE)
+
+unique(shp_eu$NUTS_NAME)
+
+unique(shp_eu$NUTS_ID)
+```
+
+Unfortunately, the country names used have special characters in them, and no encoding that I chose (like UTF-8) could actually make them print out fine. Thankfully, though, there is a `NUTS_ID` column, which has a set of nice indicators for countries.
+
+This was a fortunate case. If you will be working with some shapefiles produced by other organizations, with fewer resources, you might have to fix these issues by hand, one-by-one. All we need now to be able to merge the map information with the substantive information from the QoG is to create a variable for country names in a format that matches the way country names are presented in the QoG data.
+
+```{r prepare-shapefile-merging}
+shp_eu <- shp_eu %>% 
+    mutate(cname = countrycode(sourcevar = NUTS_ID,
+                               origin = "iso2c",
+                               destination = "country.name")) %>% 
+    # Still some problems that we need to correct by hand
+    mutate(cname = if_else(NUTS_ID == "CZ", "Czech Republic", cname),
+           cname = if_else(NUTS_ID == "EL", "Greece", cname),
+           cname = if_else(NUTS_ID == "UK", "United Kingdom", cname),
+           cname = if_else(NUTS_ID == "MK", "North Macedonia", cname))
+```
+
+
+
+# Merging with substantive information
+We use the `left_join()` function from the `dplyr` package. We made sure above that both data set have a country name variable, `cname`, which has the same format. Because `shp_eu` is a `sf` type of object, it can be easily merged with a data frame object. This will not work so easily with other types of spatial objects.
+
+```{r merge-data}
+shp_eu <- left_join(shp_eu, df_eu_16, by = "cname")
+```
+
+See a few of the variables listed here (for the first 5 countries).
+
+```{r see-indicators}
+shp_eu %>% 
+  dplyr::select(NUTS_ID, NAME_LATN, cname, al_ethnic2000, wdi_pop,
+                fh_score, gini, geometry) %>% 
+  
+  slice(1:5)
+```
+
+
+# Basics
+
+Plotting is simply making a call to `geom_sf()`, as all the information needed to plot is available in the `shp_eu` object.
+
+```{r plot-01, fig.height=6, fig.width=8, fig.align='center'}
+ggplot(data = shp_eu) + 
+    geom_sf()
+```
+
+Unfortunately, we can't readily exclude the islands from the image. With the islands, though, the map is not useful. The easiest thing we can do is to zoom to an area of the map that contains exactly the area we want to visualize.
+
+```{r plot-02, fig.height=6, fig.width=8, fig.align='center'}
+ggplot(data = shp_eu) +
+    geom_sf() +
+    coord_sf(xlim = c(-30, 47), # Zoom in specifically on this area
+             ylim = c(33, 74))
+```
+
+Because this is a `ggplot2` object, some of the same functions that we learned over the course of yesterday work for this plot as well. For example, it would be nice to get rid of the background for the plot. Additionally, by default the *Mercator* projection is used for the plot; however, this makes the plot look elongated. We can easily switch to a *Albers* projection, which somehow seems more "natural".^[Look at these options: [https://observablehq.com/@toja/five-map-projections-for-europe](https://observablehq.com/@toja/five-map-projections-for-europe).]
+
+```{r plot-03, fig.height=6, fig.width=8, fig.align='center'}
+ggplot(data = shp_eu) +
+    geom_sf() +
+    coord_sf(crs = st_crs("ESRI:102013"), # "Albers Equal Area"
+             xlim = c(-1600000, 2900000), # This has been tightened
+             ylim = c(600000, 4500000)) + 
+    theme_bw()
+```
+
+Because of the different projection, I also altered the limits in the `coord_map()` function. The other big change is the numbers in **xlim** and **ylim**, which are now expressed in meters, not the more intuitive degrees from before. See how we tend to use the same functions for converting the scale to percentages (the plot below), or applying a theme to the graph?
+
+We will start by plotting a substantive quality: the degree of urbanization in each country. We want a 0-1 value for urbanization so as to automatically convert it into a percent. We can also assign a custom name to the fill scale, as you can see here.
+
+```{r plot-04, fig.height=6, fig.width=8, fig.align='center'}
+ggplot(data = shp_eu) +
+    geom_sf(mapping = aes(fill = wdi_popurb / 100)) + # We want a 0-1 value
+    coord_sf(crs = st_crs("ESRI:102013"),
+             xlim = c(-1600000, 2900000),
+             ylim = c(600000, 4500000)) + 
+    theme_bw() +
+    scale_fill_continuous(labels = scales::percent_format(),
+                          name = "Urbanization")
+```
+
+This scales easily to other variables in the data set as well - it can be any quantity you want. It even works for categorical scale, e.g. if the country has a majoritarian, proportional, or mixed electoral system.
+
+```{r plot-05, fig.height=6, fig.width=8, fig.align='center'}
+ggplot(data = shp_eu) +
+    geom_sf(mapping = aes(fill = mad_gdppc)) +
+    coord_sf(crs = st_crs("ESRI:102013"),
+             xlim = c(-1600000, 2900000),
+             ylim = c(600000, 4500000)) +
+    theme_bw() +
+    scale_fill_continuous(name = "GDP per/ncapita")
+```
+
+We might also want to plot the name of the country. In past years, this was not so easy: it involved computing the centroid (center point) of each country, and then plotting the name of the country at that position. Since **ggplot2** 3.1.0, though, we have a very convenient function that does this automatically: `geom_sf_label()`.^[You might have noticed that the label for Norway is somehow missing. There's a simple explanation for this: that label is placed on Spitsbergen island, further up in the Arctic Ocean, but because we bounded the map with `xlim` and `ylim` we simply can't see this. If we wanted to keep the map focused on "mainland Europe", a solution to this dilemma is to just move the label for Norway only, like in this suggested answer: [https://community.rstudio.com/t/geom-sf-text-change-position-of-only-one-text-label/73419](https://community.rstudio.com/t/geom-sf-text-change-position-of-only-one-text-label/73419).]
+
+```{r plot-06, fig.height=6, fig.width=8, fig.align='center'}
+ggplot(data = shp_eu) +
+    geom_sf(mapping = aes(fill = mad_gdppc)) +
+    geom_sf_label(mapping = aes(label = NUTS_ID)) +
+    coord_sf(crs = st_crs("ESRI:102013"),
+             xlim = c(-1600000, 2900000),
+             ylim = c(600000, 4500000)) +
+    theme_bw() +
+    scale_fill_continuous(name = "GDP per/ncapita")
+```
+
+
+# Faceted maps
+Let's say that your goal is to show how a phenomenon has changed over time in these countries (a bit like in those comparative plots for Covid-19 case numbers in Georgia). A good solution might be to present it as a series of faceted graphs, where the facets comprise the different time periods we're interested in.
+
+To prepare the data for this we'll have to empty the workspace, load and clean the data again, only this type with a few more years of observations.
+
+```{r prepare-data-over-time}
+rm(list=ls())
+
+# Read in country data again, but select 3 years
+df_qog_21 <- readRDS(file = "../02-data/01-QoG-2021.rds")
+
+df_eu <- df_qog_21 %>% 
+    mutate(continent = if_else(cname == "Turkey", "Europe", continent),
+           cname = recode(cname,
+                          "Cyprus (1975-)" = "Cyprus",
+                          "France (1963-)" = "France"),
+           continent = if_else(cname == "Cyprus", "Europe", continent)) %>% 
+    filter(continent == "Europe" & year %in% c(1965, 1990, 2015)) %>%
+    dplyr::select(cname, year, wdi_popurb)
+
+# Read in map again
+shp_eu <- st_read(dsn = "../02-data/NUTS_RG_03M_2021_4326_LEVL_0.shp",
+                  quiet = TRUE)
+
+# Same corrections as above
+shp_eu <- shp_eu %>% 
+    mutate(cname = countrycode(sourcevar = NUTS_ID,
+                               origin = "iso2c",
+                               destination = "country.name")) %>% 
+    # Still some problems that we need to correct by hand
+    mutate(cname = if_else(NUTS_ID == "CZ", "Czech Republic", cname),
+           cname = if_else(NUTS_ID == "EL", "Greece", cname),
+           cname = if_else(NUTS_ID == "UK", "United Kingdom", cname),
+           cname = if_else(NUTS_ID == "MK", "North Macedonia", cname))
+```
+
+To get this data ready, though, we have to put it through two rounds of reshaping. First, we reshape the data so that we produce 3 columns, each specifying the value of % urban population for one of the 3 years. After this resulting data set is merged with the information obtained from the QoG, we proceed with the second reshaping. In this second process, we want to produce only one variable that refers to % urban population, along with one variable called `year` which refers to the year in which this urbanization measurement was taken.^[I could not figure out how to do this with the `pivot_longer()` function from the `tidyr` package, so I did it more or less manually.]
+
+```{r reshape-data-over-time}
+df_eu <- df_eu %>% 
+    pivot_wider(id_cols = cname,
+                names_from = year,
+                values_from = wdi_popurb) %>% 
+    rename(urb65 = `1965`,
+           urb90 = `1990`,
+           urb15 = `2015`)
+
+# Go on with the merging as before
+shp_eu <- left_join(shp_eu, df_eu, by = "cname")
+
+df1 <- shp_eu %>%
+    dplyr::select(-c(urb90, urb15)) %>%
+    rename(urb.perc = urb65) %>%
+    mutate(year = 1965)
+df2 <- shp_eu %>%
+    dplyr::select(-c(urb65, urb15)) %>%
+    rename(urb.perc = urb90) %>%
+    mutate(year = 1990)
+df3 <- shp_eu %>%
+    dplyr::select(-c(urb65, urb90)) %>%
+    rename(urb.perc = urb15) %>%
+    mutate(year = 2015)
+
+shp_eu <- rbind(df1, df2, df3)
+rm(df1, df2, df3)
+```
+
+```{r plot-07, fig.height=4, fig.width=9, fig.align='center'}
+ggplot(data = shp_eu) +
+    geom_sf(mapping = aes(fill = urb.perc)) +
+    coord_sf(crs = st_crs("ESRI:102013"),
+             xlim = c(-1600000, 2900000),
+             ylim = c(600000, 4500000)) +
+    theme_bw() +
+    scale_fill_continuous(name = "% urban population") +
+    facet_wrap( ~ year, nrow = 1) +
+    theme(legend.position = "bottom")
+```
+
+
+
+# Creating custom maps
+Frequently, the goal is not to display a country, a region, or even a constituency in a certain way, e.g. with a color intensity denoting the share of vote for a party. Rather, there are plenty of cases where the interest is in actually plotting events that have occurred on the map, and seeing whether their spread has a particular pattern.
+
+As long as we have the coordinates of the events, we can, of course, plot these on a type of map that we read into `R` through the methods I showed you above. However, there is frequently no shapefile which can be downloaded from a statistical office or GIS desk in an institution. For these cases, we have the `ggmap` package.
+
+As a demonstration case, I opted for a data set detailing crimes in New York City. This covers close to 465,000 crimes in New York over 2018. For each crime, we have a unique ID number, when the complaint was made, the type of crime, the category of crime, as well as latitude and longitude for where it happened. These last 2 variables are crucial if we want to plot them.
+
+```{r load-inspect-data}
+df_ny_crime <- readRDS(file = "../02-data/03-NYC-crime-2018.rds")
+
+df_ny_crime %>% 
+    slice(1:10)
+```
+
+By default, the date column is not formatted as datetime, which would allow us to subset particular time periods. We can easily transform it, though.
+
+```{r encode-date-crime}
+df_ny_crime <- df_ny_crime %>% 
+    mutate(CMPLNT_FR_DT = as.POSIXct(strptime(CMPLNT_FR_DT,
+                                              format = "%m/%d/%Y")))
+```
+
+I select here only the month of December and the last week, for easier plotting. In this way I've overwritten the `df_ny_crime` data, so we have lost the other 11 months in the data, as well as the other 24 days.
+
+```{r subset-nyc-data}
+df_ny_crime <- df_ny_crime %>%
+    filter(format.Date(CMPLNT_FR_DT, "%m") == "12" & 
+               format.Date(CMPLNT_FR_DT, "%d") %in% 
+               c("25","26","27","28","29","30","31"))
+```
+
+At this point, let's get the map that we need. Because we're relying on a Google Maps service, I had to sign up for a paid account with Google Cloud. To be able to activate this, we have to register the API key which Google issued me with.
+
+After this, you will have to go into your Google Cloud Console, and from "APIs" you will have to enable: (1) Geocoding API; (2) Geolocation API; (3) Places API. After these 3 APIs are enabled, the code below should work.
+
+```{r download-gmaps-map, eval=FALSE}
+ggmap::register_google(key = "SET_YOUR_KEY_HERE")
+map_nyc <- get_map(location = "new york city",
+                   zoom = 11)
+```
+
+You can vary the value of the zoom depending on whether you need a more detailed map (down to alleys).
+
+Instead of going through that, though, I've just saved the map I downloaded from Google in the object below.
+
+```{r load-nyc-map}
+load("../02-data/04-NYC-map.Rdata")
+```
+
+Create a first version of the plot.
+
+```{r plot-08, fig.height=7, fig.width=8, fig.align='center'}
+ggmap(map_nyc)
+```
+
+Start adding the points, based on the coordinates we have in the `df_ny_crime` data frame.
+
+```{r plot-09, fig.height=7, fig.width=8, fig.align='center'}
+ggmap(map_nyc) +
+    geom_point(aes(x = Longitude,
+                   y = Latitude),
+               data = df_ny_crime,
+               size = 0.75)
+```
+
+---
+
+**Small Task**: Try to store the plot above in an object, and then save 2 versions of that plot on your computer:
+
+1. A JPEG of size 10in x 10in, at dpi = 400
+2. A PDF of size 10in x 10in
+
+Compare the size of each plot.
+
+---
+
+If you want to give extra detail to the map, you could also try coloring the points based on the type of crime that was committed.
+
+```{r plot-10, fig.height=7, fig.width=8, fig.align='center'}
+ggmap(map_nyc) +
+    geom_point(aes(x = Longitude,
+                   y = Latitude,
+                   color = LAW_CAT_CD), # Our old friend, "color"
+               data = df_ny_crime,
+               size = 0.75) +
+    theme(legend.position = "bottom") # Place legend at the bottom
+```
+
+If your goal is not to explain something about the occurrence of a particular type, but rather about the concentration of crime, you can go for the same color throughout, but use the transparency argument to see where points overlap.
+
+```{r plot-11, fig.height=7, fig.width=8, fig.align='center'}
+ggmap(map_nyc) +
+    geom_point(aes(x = Longitude,
+                   y = Latitude),
+               data = df_ny_crime,
+               size = 0.25,
+               alpha = 0.4) # Our old friend "alpha"
+```
+
+Finally, you can do a density plot to see where the areas of highest crime are (though, keep in mind, we don't have the information about population size in each area. It may be that some areas have higher crime numbers because they are more populated, but if we controlled for population, we might find that the probability of experiencing crime per individual is not very different across areas).
+
+```{r plot-12, fig.height=7, fig.width=8, fig.align='center'}
+ggmap(map_nyc) +
+    stat_density_2d(data = df_ny_crime,
+                    mapping = aes(x = Longitude,
+                                  y = Latitude,
+                                  fill = stat(level)),
+                    geom = "polygon",
+                    alpha = 0.3,
+                    bins = 6) # Reduce number of bins so as to only
+                              # plot high density areas.
+```
+
+---
+
+**Practice**:  If you're interested in trying for yourselves whether you can produce simple maps, I've added to the Moodle page data for a test case. You can see there 2 data files:
+
+1. Crimes perpetrated in Berlin at the district level: `05-BRL-crime-2019.rds`
+2. A map of districts in Berlin: `LOR_Bezirksregionen__Berlin.shp`.
+
+Try to plot one of the crime categories in the data. Use the functions you acquired in the first part of today's session.
+
+One small step you will have to do is to make sure the matching variable for the two data sets actually matches. To solve the fact that at the moment it doesn't, please look here for some advice on how to do this: [https://stackoverflow.com/questions/5812493/how-to-add-leading-zeros](https://stackoverflow.com/questions/5812493/how-to-add-leading-zeros).

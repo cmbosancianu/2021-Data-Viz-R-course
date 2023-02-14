@@ -1,0 +1,320 @@
+---
+title: "Session 2 Code (day 1)"
+author: "Constantin Manuel Bosancianu"
+date: "April 29, 2021"
+output:
+  rmdformats::downcute:
+    self_contained: true
+    thumbnails: true
+    lightbox: true
+    gallery: false
+    code_folding: hide
+    highlight: pygments
+---
+
+# Goals
+
+We devote this first session to exploring one of the most powerful packages available in `R` for a host of data transformations and reshaping tasks: `dplyr`. For those of you who have not had contact so far with `dplyr` and the `tidyverse` collection of packages, you will see that getting familiar with them requires not only learning new functions, but also becoming accustomed to a new way of writing `R` code and a new logic of code-writing.
+
+As this process invariably takes some time, I wanted to allocate this entire first session to getting familiar with the data we'll be working on, and to presenting the core functionality of `dplyr`.
+
+# Preliminary preparations
+
+## Data
+The data for some of the sessions in the course comes from the **Quality of Governance (QoG)** data set (version January 2021): [https://qog.pol.gu.se/data/datadownloads/qogstandarddata](https://qog.pol.gu.se/data/datadownloads/qogstandarddata).
+
+The data has a time-series structure: each line is a observation for 1 year, and the data comprises about 211 countries (some of whom are no longer in existence). For each of these, data spanning multiple years is collected. I have also added manually a few variables that used to be in past editions of the **QoG**, but are no longer included in the 2021 version.
+
+I have maintained the original variable names from the **QoG** data, which means that you will have to constantly work with a codebook to see what specific variable names mean, e.g. `dpi_fraud` or `wdi_gerpf`. The codebook is available at: [http://www.qogdata.pol.gu.se/data/qog_std_jan19.pdf](http://www.qogdata.pol.gu.se/data/qog_std_jan19.pdf).^[I have kept the codebook from the older version of the data set because the 2021 version of QoG doesn't have some of these variables, but the 2019 one does. Last accessed: April 29, 2021.]
+
+
+## Loading packages
+Instead of using the `library()` function, with which you're already familiar, I make use here of a function from the `pacman` package, called `p_load()`. This loads a set of packages that we need. The function first checks if the packages are installed on your computer. If yes, it loads them into `R`. If not, it downloads and installs them on your computer, and then loads them into `R`.^[This approach is great if you'll be sharing code with collaborators, since it ensures that everyone starts with the same set of packages loaded into `R`'s memory.]
+
+**Warning**: the following code chunk will install packages on your computer!
+
+```{r setup-packages, warning=FALSE, message=FALSE, comment=NA, results='hide'}
+knitr::opts_chunk$set(echo = TRUE,
+                      warning = FALSE,
+                      error = FALSE,
+                      comment = NA,
+                      message = FALSE)
+
+library(pacman)
+p_load(tidyverse, ggthemes)
+```
+
+When working with standard `.R` files, you might have also been used to set the working directory for the project at this stage. When working with `.Rmd` files this is no longer required. The working directory is, by default, the folder in which the `.Rmd` file is placed.
+
+```{r load-data}
+df_qog_21 <- readRDS(file = "../02-data/01-QoG-2021.rds")
+```
+
+
+
+# `dplyr` logic
+For us, it's not worth going particularly deep into the history of how `dplyr` appeared on the `R` scene. However, it's important to point out that the way in which `dplyr` works, and how you write code for it, is fundamentally different than what you've seen until now in "base" `R`.
+
+First, `dplyr` makes extensive use of the "pipe" operator, `%>%`, which allows it to "daisy-chain" data transformation operators one after another in the same block of code.^[Python users will be used to a similar functionality provided by the `.` operator.] A quick way of making sense of the pipe operator's logic is to roughly translate it as "take this object ... and then do this to is...". For example, a quick recoding procedure in "base" `R` could be:
+
+```{r demo-1}
+set.seed(12098)
+df_demo <- data.frame(A = rnorm(100, 0, 1),
+                      B = rnorm(100, 1, 2))
+
+df_demo$C[df_demo$B >= 1] <- "above"
+df_demo$C[df_demo$B <  1] <- "below"
+```
+
+You can see that in order to do more complex operations, you need to nest commands in one another. Sometimes these can get quite complex and cumbersome to read. In `dplyr` logic, the same procedure is done like this:
+
+```{r demo-2, eval = FALSE}
+df_demo_new <- df_demo %>% 
+  mutate(C = if_else(B >= 1, "above", "below"))
+```
+
+The pipe operator here essentially means: "take the `df_demo` object and then do `mutate()` to it". As we'll see below, `mutate()` is the command that lets you create a new variable in the data - in this case, **C**. The pipe operator basically took the `df_demo` object and *piped* it into the function `mutate()` on the following line. Here's a much simpler illustration of this principle, where the data set is piped into the function `head()`, which displays in the console the first few rows of the data set:
+
+```{r demo-3}
+df_demo %>% 
+  head()
+```
+
+When you're doing more complex data transformation operations, though, there is no reason why you would stop after only one line, though - the chain of operations could continue:
+
+```{r demo-4}
+df_demo_new <- df_demo %>% 
+  mutate(C = if_else(B >= 1, "above", "below")) %>% 
+  mutate(D = if_else(A <= 0, "Low", "High"))
+```
+
+The second thing you might have noticed is that `dplyr` is a bit closer to **Stata** (and particularly **Python**) in the way it makes use of variables. In such a chain of operations you don't need to specify every time to which data object a variable belongs to, since that is obvious from the first line in the chain. All the variables I worked with above (`A` and `B`) come from the `df_demo` object, and all the new variables created as part of the chain (`C` and `D`) are stored in the `df_demo_new` object.
+
+The third important aspect about `dplyr` is that it was designed to work only with data frames (or "tibbles"). Thankfully, this is one of the most common formats to store data in with `R`, so you'll see that it's not a particularly important limitation for us now in the beginning.
+
+
+
+# Important functions
+Though we won't have time to go through all of the functions available in the `dplyr` package, we will get to the most important ones:
+
+* `filter()`: select specific rows in the data based on logical conditions;
+* `select()`: select specific variables in the data;^[My advice is to be more careful than usual with this function, since `select()` is a very popular name for functions in many `R` packages. Depending on which package you load last, you might be using a different `select()` than you think. Because of this, my advice is to always specify the package when it comes to this specific function, like this: `dplyr::select()`.]
+* `rename()`: rename variables in the data;
+* `arrange()`: reorganize the rows in the data;
+* `mutate()`: create new variables;
+* `group_by()`: split data into groups;
+* `summarise()`: compute summary statistics from the data, and save them in a new data frame.
+
+To these, I also add `recode()`, `case_when()`, and `if_else()`, which are very important when it comes to data recoding, but are not functions that are applied to the data set itself.
+
+## filter()
+To get at how these functions work, let's use a small snippet of the data that we will rely on throughout the next 2 days. Let's say that we have a big data set that we're starting with, but we want to only focus on one particular moment in time, e.g. all observations from 2010. For these tasks, which require selecting only specific rows from the data, we can use the `filter()` function.
+
+```{r select-snippet-data-1}
+rm(df_demo, df_demo_new)
+
+df_qog_snip <- df_qog_21 %>% 
+  filter(year == 2010)
+
+dim(df_qog_snip)
+```
+
+By checking the size of the resulting data set we can see that our of the larger data set, which has `r dim(df_qog_21)[1]` observations and `r dim(df_qog_21)[2]` variables, our filtered data now keeps only `r dim(df_qog_snip)[1]` observations - all the measurements taken in 2010.
+
+Given that `filter()` works by logically evaluating the conditions inside the brackets, we can set even more complex expressions that are to be evaluated. For example, say that we were interested in looking at all countries in 2010 that were consolidated democracies at the time. Our cutoff for being a consolidated democracy is having a **Freedom House** score of at least 11 on a 0--12 scale. We can easily filter the data to only keep these observations:
+
+```{r select-snippet-data-2}
+df_qog_snip <- df_qog_21 %>% 
+  filter(year == 2010 & fh_score >= 11)
+
+dim(df_qog_snip)
+```
+
+You can now see that the data is reduced to only `r dim(df_qog_snip)[1]` observations, comprised of all observations made in 2010 for countries that have a Freedom House score of at least 11.
+
+## select()
+Though we've been able to reduce the number of rows based on some criteria of interest, we're still dealing with a data set with `r dim(df_qog_snip)[2]` columns. The `select()` function can help us make things even more manageable, by removing variables.
+
+This can be done in two ways. First, we can specify the variables we definitely need to keep.^[Notice how unlike "base" `R`, where variable names are specified as character strings, `dplyr` code allows for variable names to be specified without quotation marks.]
+
+```{r select-snippet-data-3}
+df_qog_snip <- df_qog_21 %>% 
+  dplyr::select(ccode, cname, year, al_ethnic2000, gini, fh_score)
+```
+
+If we want to keep more than a few variables, it might be tedious to write the names of each and every one of them. Using the colon operator, `:`, allows us to specify all variables in a specific range - `A:B` means all variables between `A` and `B`, including these two. With this convention, the code above could be written up simpler as:
+
+```{r select-snippet-data-4}
+df_qog_snip <- df_qog_21 %>% 
+  dplyr::select(ccode:al_ethnic2000, gini, fh_score)
+
+df_qog_snip %>%
+  head(3)
+```
+
+The second way to specify variables is by listing the ones that ought to be excluded. For example, say we want to pare down even further our already reduced data set.
+
+```{r select-snippet-data-5}
+df_qog_snip %>% 
+  dplyr::select(-gini) %>% 
+  head(3)
+```
+
+Or, even going beyond that, by trimming multiple variables from the data.
+
+```{r select-snippet-data-6}
+df_qog_snip %>% 
+  dplyr::select(-gini, -ccode) %>% 
+  head(3)
+```
+
+## rename()
+Another standard operation that frequently needs to be performed when working with secondary data is renaming variables. Though it's generally good to keep variable names relatively short (around 6-9 characters), which makes lines of code more compressed and easier to read, it's also important that you make use of names that are easy to recall and as self-explanatory as possible. The `rename()` function let's you easily change these names. An additional advantage of using it, which you will also see holds for `mutate()`, is that you can do multiple renaming operations in the same function call, without the need to write `rename()` again each and every time.
+
+```{r rename-variables-1}
+df_qog_snip %>% 
+  rename(country_code = ccode,
+         country_name = cname) %>% 
+  head(3)
+```
+
+You can see in the block of code above that the way `rename()` works is by specifying the **new** name of the variable first, followed by the name of the **old** variable it is replacing. In some cases, it might be useful to refer to variables not by their actual name, but by the order they have in the data frame. Thankfully, `rename()` easily allows for this, and the block of code below does exactly the same thing as the one above.
+
+```{r rename-variables-2}
+df_qog_snip %>% 
+  rename(country_code = 1,
+         country_name = 2) %>% 
+  head(3)
+```
+
+## arrange()
+Frequently you might need to re-order rows in the data frame in a specific order, e.g. alphabetically, from largest to smallest value, or from earliest to latest time. Doing this in a quick and convenient way is the job of `arrange()`.
+
+As I mentioned in the beginning, though, one of the great advantages of a `dplyr` workflow is that you can combine these various operations in a chain of piped commands. Once you get used to writing and interpreting these kinds of chains you will see how appealing the logic is. It's time now to gradually get used to constructing these chains, which is why I begin to introduce them here. Let's first filter only the observations from 2010 for all consolidated democracies, and then arrange the countries from highest to lowest level of income inequality.
+
+```{r arrange-rows-1}
+df_qog_21 %>% 
+  filter(year == 2010 & fh_score >= 11) %>% # Filter by year and level of democracy
+  dplyr::select(cname, gini) %>% # Select only country name and inequality 
+  na.omit() %>% # Listwise deletion of observations
+  arrange(-gini) %>%  # Arrange in descending order
+  head(10)
+```
+
+We can follow the same process, only this time arrange the observations in ascending order, by income inequality level. `arrange()` is even more powerful than this, though, since it can sort observations by multiple variables. In the block below they are sorted first by continent, and then, within each continent, in ascending order of income inequality.
+
+```{r arrange-rows-2}
+df_qog_21 %>% 
+  filter(year == 2010 & fh_score >= 11) %>%
+  dplyr::select(cname, gini, continent) %>%
+  na.omit() %>% 
+  arrange(continent, gini) %>%  # Arrange in ascending order
+  head(15)
+```
+
+## summarise()
+In many applications you will need to create summaries of the data you're working with, and to use those summaries further on in your work. For example, we might be interested in the average of income inequality in a particular sample.
+
+```{r summarize-data-1}
+df_qog_21 %>% 
+  filter(year == 2010 & fh_score >= 11) %>%
+  dplyr::select(cname, gini) %>%
+  na.omit() %>% 
+  summarise(gini_ave = mean(gini))
+```
+
+Additional quantities are also available - in fact, any function, even custom ones, that can be applied to a vector will work here.
+
+```{r summarize-data-2}
+df_qog_21 %>% 
+  filter(year == 2010 & fh_score >= 11) %>%
+  dplyr::select(cname, gini) %>%
+  na.omit() %>% 
+  summarise(gini_ave = mean(gini),
+            gini_sd = sd(gini))
+```
+
+By itself, this isn't extremely helpful, except as a way of quickly getting summary quantities of interest from the data. However, this function will become extremely powerful when combined with `group_by()`.
+
+## group_by()
+This represents one of the most useful functions in the `dplyr` arsenal, as it chops up the data based on values of the variable supplied as argument, and then it applies all subsequent functions to the separate "slices" of data. Let's take as example our previous try at computing the average Gini index value with `summarise()`. What if we tried doing the same, but separately for each continent?
+
+```{r group-summarize-data-1}
+df_qog_21 %>% 
+  filter(year == 2010 & fh_score >= 11) %>%
+  dplyr::select(cname, gini, continent) %>%
+  na.omit() %>% 
+  group_by(continent) %>% # Split the data up based on the continent
+  summarise(gini_ave = mean(gini))
+```
+
+It's good to keep in mind that `dplyr` functions return a data frame, so you can always save the output from them in another object, and use it further for analysis or plotting.
+
+Just as before, we can also specify more than one variable as arguments to `group_by()`, and the function will split the data up based on all possible combinations of values on these variables. For example, what happens if we want to see how the trend in inequality in consolidated democracies on the 5 continents we have in the data evolved between 1990 and 2010? It's easy to get to this by just adding one more factor in the call to `group_by()`.
+
+```{r group-summarize-data-2}
+df_qog_21 %>% 
+  filter(year %in% c(1990, 2010) & fh_score >= 11) %>%
+  dplyr::select(cname, year, gini, continent) %>%
+  na.omit() %>% 
+  group_by(continent, year) %>% # See the change here
+  summarise(gini_ave = mean(gini))
+```
+
+If you'll link many `dplyr` functions together, it's important to remember that `group_by()` will apply to all subsequent functions. If at one point you want to revert back to calculations done on the entire data set, you can cancel the grouping by using the `ungroup()` function (it requires no arguments).
+
+```{r group-summarize-data-3, eval=FALSE}
+df_qog_21 %>% 
+  filter(year %in% c(1990, 2010) & fh_score >= 11) %>%
+  dplyr::select(cname, year, gini, continent) %>%
+  na.omit() %>% 
+  group_by(continent, year) %>%
+  summarise(gini_ave = mean(gini)) %>% 
+  ungroup() # All operations after this work on full data
+```
+
+
+## mutate()
+For most new variables you need created in the data set, `mutate()` is the go-to function. It's usually used in combination with other functions which do the actual recoding procedures, like `case_when()` or `if_else()`. Let's continue with our example with democracies, and try to recode the Freedom House democracy score on a very simple trichotomous scale, distinguishing between "non-democracies", "emerging democracies", and "consolidated democracies".
+
+Doing this with `case_when()` is very easy:
+
+```{r recode-data-1}
+df_qog_21 %>% 
+  filter(year == 2010) %>% 
+  dplyr::select(cname, gini, fh_score) %>%
+  mutate(demo_group = case_when(fh_score <= 5 ~ "non-democracy",
+                                fh_score > 5 & fh_score <= 10 ~ "emerging democracy",
+                                fh_score > 10 ~ "consolidated democracy")) %>% 
+  head(10)
+```
+
+`case_when()` works by establishing a correspondence between old values and new values. Anything lower than 5 is recoded as "non-democracy", larger than 5 but lower than 10 is recoded as "emerging democracy", and so on. We could even specify one by one the 13 levels in `fh_score` and assign them new values if we wanted to, but doing it based on these logical operations is considerably faster (from the perspective of writing code).
+
+What if we also wanted to recode the Gini index into just 2 categories, "high" and "low", based on the median value for that variable? This is easy as well, using the `if_else()` command; this has the advantage of being able to get things done with only 1 line of code.
+
+```{r recode-data-2}
+df_qog_21 %>% 
+  filter(year == 2010) %>% 
+  dplyr::select(cname, gini, fh_score) %>%
+  mutate(demo_group = case_when(fh_score <= 5 ~ "non-democracy",
+                                fh_score > 5 & fh_score <= 10 ~ "emerging democracy",
+                                fh_score > 10 ~ "consolidated democracy"),
+         ineq_group = if_else(gini >= 39.8, "High inequality", "Low inequality")) %>% 
+  head(10)
+```
+
+`if_else()` works by testing the logical condition in the first argument of the function. If the condition is true (a value of Gini is higher than 39.8), this value gets replaced with the second argument; if it's false, it gets replaced with the third argument.
+
+You also see here another nice property of `mutate()`: you can specify multiple variables to be recoded inside the same call to the function. You can even create a new variable using as input a variable created further up in the `mutate()` cue.
+
+# Concluding thoughts
+There are many other smaller functions that `dplyr` introduces, which are generally meant to simplify smaller tasks in data recoding and reshaping, such as `relocate()`, `rowwise()`, `lead()`, `lag()`, `count()`, and others. With time, if you continue to use the package, you will get a good overview of most of them. The most valuable feature of `dplyr` is not the range of functions that it introduces, though, but the logic it introduces in the syntax used for data cleaning and reshaping, which makes the code easier to read and process for other `dplyr` users.
+
+# Package versions
+
+Package versions used in this script.^[Helpful information when trying to replicate the results.]
+
+```{r package-versions}
+sessionInfo()
+```
